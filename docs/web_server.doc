@@ -1,0 +1,103 @@
+Web Server Documentation
+=====================
+
+Overview
+--------
+The web server module provides a RESTful API interface for the trading bot, serving dashboard metrics, alerts, and system health information. It uses Actix-web for high-performance asynchronous HTTP handling.
+
+Configuration
+------------
+```rust
+use your_crate::web::server::WebServer;
+use your_crate::monitoring::dashboard::Dashboard;
+use your_crate::security::SecurityManager;
+use std::sync::Arc;
+
+let dashboard = Arc::new(Dashboard::new(config, update_interval));
+let security = Arc::new(SecurityManager::new(security_config)?);
+let server = WebServer::new(dashboard, security);
+```
+
+Usage
+-----
+
+1. Initialization
+```rust
+let server = WebServer::new(dashboard, security);
+server.start("127.0.0.1", 8080).await?;
+```
+
+2. API Endpoints
+   - GET /health - System health check
+   - GET /metrics - Dashboard metrics
+   - GET /alerts - Active alerts
+   - POST /alerts/{id}/resolve - Resolve an alert
+
+Features
+--------
+1. RESTful API
+   - JSON responses
+   - Error handling
+   - CORS support
+   - Async operations
+
+2. Security
+   - Rate limiting
+   - Input validation
+   - API key authentication
+   - CORS configuration
+
+3. Monitoring
+   - Health checks
+   - Metrics endpoint
+   - Alert management
+   - System status
+
+Best Practices
+-------------
+1. Use HTTPS in production
+2. Implement proper error handling
+3. Set appropriate CORS policies
+4. Monitor API usage
+5. Validate all inputs
+6. Use proper logging
+
+Error Handling
+------------
+- HTTP status codes
+- JSON error responses
+- Logging
+- Graceful degradation
+
+Testing
+-------
+The module includes tests for:
+- Server creation
+- Endpoint responses
+- Error handling
+- Security features
+
+Dependencies
+-----------
+- actix-web: Web framework
+- actix-cors: CORS middleware
+- serde: Serialization
+- log: Logging
+- chrono: Time handling
+
+Troubleshooting
+--------------
+1. Check server logs
+2. Verify CORS settings
+3. Test endpoints
+4. Monitor performance
+5. Check security settings
+6. Review error responses
+
+Support
+-------
+For additional support:
+1. Review server logs
+2. Check configuration
+3. Test endpoints
+4. Contact system administrator 

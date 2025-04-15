@@ -1,0 +1,135 @@
+Health Monitoring System Documentation
+===================================
+
+Overview
+--------
+The health monitoring system provides real-time monitoring of various system metrics and components. It tracks system health, performance, and error rates to ensure the trading bot operates optimally.
+
+Components
+----------
+1. System Metrics
+   - Memory usage
+   - CPU usage
+   - Error rates
+   - API connectivity
+   - Database status
+   - Trading bot status
+
+2. Configuration
+   - Memory threshold
+   - CPU threshold
+   - Error rate threshold
+   - Check interval
+
+Usage
+-----
+
+1. Initialization
+```rust
+use your_crate::monitoring::health::{HealthMonitor, HealthConfig};
+
+let config = HealthConfig {
+    check_interval_seconds: 60,
+    memory_threshold: 90.0,
+    cpu_threshold: 90.0,
+    error_rate_threshold: 10.0,
+};
+
+let monitor = HealthMonitor::new(config);
+```
+
+2. Updating Metrics
+```rust
+// Update system metrics
+monitor.update_metrics().await?;
+
+// Record errors
+monitor.record_error("Error message".to_string()).await;
+
+// Record requests
+monitor.record_request().await;
+```
+
+3. Checking System Health
+```rust
+if monitor.is_healthy().await {
+    println!("System is healthy");
+} else {
+    println!("System is unhealthy");
+}
+```
+
+4. Getting Metrics
+```rust
+let metrics = monitor.get_metrics().await;
+println!("CPU Usage: {}%", metrics.cpu_usage);
+println!("Memory Usage: {}%", metrics.memory_usage);
+println!("Error Rate: {}%", metrics.error_rate);
+```
+
+Configuration
+------------
+- `check_interval_seconds`: How often to update metrics
+- `memory_threshold`: Maximum allowed memory usage percentage
+- `cpu_threshold`: Maximum allowed CPU usage percentage
+- `error_rate_threshold`: Maximum allowed error rate percentage
+
+Health Status
+------------
+The system is considered healthy when:
+1. Memory usage is below threshold
+2. CPU usage is below threshold
+3. Error rate is below threshold
+4. API is connected
+5. Database is connected
+6. Trading bot is operational
+
+Error Handling
+-------------
+- All operations return Result types
+- Errors are logged using the logging system
+- Error rates are tracked and monitored
+- Last error message is stored for debugging
+
+Testing
+-------
+The module includes tests for:
+- Initialization
+- Metric updates
+- Error recording
+- Status changes
+- Health checks
+
+Dependencies
+-----------
+- sysinfo: For system metrics
+- tokio: For async operations
+- chrono: For timestamps
+- serde: For serialization
+- log: For logging
+
+Best Practices
+-------------
+1. Regularly update metrics
+2. Monitor error rates closely
+3. Set appropriate thresholds
+4. Handle errors gracefully
+5. Log important events
+6. Use async operations for performance
+
+Troubleshooting
+--------------
+1. Check system metrics
+2. Review error logs
+3. Verify API connectivity
+4. Check database status
+5. Monitor resource usage
+6. Review configuration
+
+Support
+-------
+For additional support:
+1. Review the test cases
+2. Check the error logs
+3. Monitor system metrics
+4. Contact system administrator 

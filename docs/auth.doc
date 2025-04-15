@@ -1,0 +1,118 @@
+Authentication Module Documentation
+================================
+
+Overview
+--------
+The authentication module provides secure user authentication and session management for the trading bot's web interface. It supports username/password authentication with optional YubiKey 2FA.
+
+Components
+----------
+
+1. AuthHandler
+   - Manages authentication state
+   - Handles token generation and validation
+   - Implements login/logout functionality
+   - Integrates with SecurityManager for additional security
+
+2. Token Management
+   - Secure token generation using SystemRandom
+   - Token expiration and refresh
+   - Token blacklisting for logout
+   - Claims-based authorization
+
+3. Authentication Flow
+   - User submits credentials
+   - System validates credentials
+   - If valid, generates JWT token
+   - Token used for subsequent requests
+   - Token can be refreshed before expiration
+   - Token invalidated on logout
+
+Usage
+-----
+
+1. Login
+```rust
+let auth = AuthHandler::new(security_manager);
+let credentials = AuthRequest {
+    username: "user".to_string(),
+    password: "pass".to_string(),
+    yubikey_otp: Some("otp".to_string()),
+};
+let response = auth.login(credentials).await;
+```
+
+2. Token Refresh
+```rust
+let token = "existing_token";
+let new_token = auth.refresh_token(token).await;
+```
+
+3. Logout
+```rust
+let token = "current_token";
+auth.logout(token).await;
+```
+
+Security Features
+---------------
+1. Secure token generation
+2. Token expiration
+3. Token blacklisting
+4. YubiKey 2FA support
+5. Rate limiting
+6. Input validation
+
+Configuration
+------------
+1. Token expiration: 24 hours
+2. Token length: 32 bytes
+3. Supported algorithms: SHA-256
+4. Required permissions for endpoints
+
+Error Handling
+-------------
+1. Invalid credentials
+2. Expired tokens
+3. Missing tokens
+4. Invalid permissions
+5. Rate limit exceeded
+
+Testing
+-------
+1. Credential validation
+2. Token generation
+3. Token refresh
+4. Token invalidation
+5. Error cases
+6. Rate limiting
+
+Best Practices
+-------------
+1. Always use HTTPS
+2. Implement proper error handling
+3. Use secure password storage
+4. Implement rate limiting
+5. Validate all inputs
+6. Use proper logging
+7. Monitor authentication attempts
+8. Implement session timeout
+9. Use secure token storage
+10. Implement proper error messages
+
+Integration
+-----------
+1. Web server integration
+2. Security manager integration
+3. Database integration
+4. Logging integration
+5. Monitoring integration
+
+Maintenance
+-----------
+1. Regular security audits
+2. Token rotation
+3. Password policy updates
+4. Security patch updates
+5. Log monitoring
+6. Performance monitoring 

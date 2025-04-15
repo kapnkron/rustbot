@@ -1,0 +1,132 @@
+API Endpoints Documentation
+========================
+
+Overview
+--------
+The API endpoints provide a comprehensive interface for interacting with the trading bot, including trading operations, system monitoring, and configuration management.
+
+Authentication
+-------------
+All endpoints require API key authentication via the `X-API-Key` header:
+```http
+X-API-Key: your_api_key_here
+```
+
+Endpoints
+---------
+
+1. System Health
+   - GET /api/health
+   - Response: System status and timestamp
+   - No authentication required
+
+2. Monitoring
+   - GET /api/metrics
+   - Response: Dashboard metrics
+   - GET /api/alerts
+   - Response: Active alerts
+   - POST /api/alerts/{id}/resolve
+   - Response: Alert resolution status
+
+3. Trading Operations
+   - POST /api/trades
+   - Request: Trade details (symbol, side, quantity, etc.)
+   - Response: Trade execution result
+   - GET /api/trades/active
+   - Response: List of active trades
+   - GET /api/trades/history
+   - Response: Trade history
+   - GET /api/positions
+   - Response: Current positions
+   - GET /api/balance
+   - Response: Account balance
+
+4. Configuration
+   - GET /api/config
+   - Response: Current configuration
+   - PUT /api/config
+   - Request: New configuration
+   - Response: Update status
+
+Request/Response Formats
+----------------------
+
+1. Trade Request
+```json
+{
+    "symbol": "BTC/USD",
+    "side": "buy",
+    "quantity": 0.1,
+    "price": 50000.0,
+    "stop_loss": 49000.0,
+    "take_profit": 52000.0
+}
+```
+
+2. Trade Response
+```json
+{
+    "order_id": "12345",
+    "status": "filled",
+    "filled_quantity": 0.1,
+    "average_price": 50000.0
+}
+```
+
+3. Balance Response
+```json
+{
+    "total_balance": 10000.0,
+    "available_balance": 8000.0,
+    "unrealized_pnl": 200.0
+}
+```
+
+Error Handling
+-------------
+All endpoints return appropriate HTTP status codes:
+- 200: Success
+- 400: Bad Request
+- 401: Unauthorized
+- 403: Forbidden
+- 404: Not Found
+- 500: Internal Server Error
+
+Error responses include a JSON object with an error message:
+```json
+{
+    "error": "Error message here"
+}
+```
+
+Rate Limiting
+------------
+- 100 requests per minute per IP
+- 1000 requests per hour per API key
+- Rate limit headers included in responses
+
+Best Practices
+-------------
+1. Always include API key
+2. Handle rate limits
+3. Check response status codes
+4. Implement retry logic
+5. Monitor error responses
+6. Use proper error handling
+
+Testing
+-------
+1. Use test API keys
+2. Test rate limiting
+3. Verify error handling
+4. Check response formats
+5. Test authentication
+6. Validate data types
+
+Support
+-------
+For additional support:
+1. Check error logs
+2. Review rate limits
+3. Verify API keys
+4. Contact system administrator 

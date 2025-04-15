@@ -1,0 +1,152 @@
+Dashboard Documentation
+=====================
+
+Overview
+--------
+The dashboard module provides a real-time monitoring interface for the trading bot, displaying system health, performance metrics, trading statistics, and alerts. It integrates with the threshold manager to provide comprehensive monitoring capabilities.
+
+Configuration
+------------
+```rust
+use your_crate::monitoring::dashboard::Dashboard;
+use your_crate::monitoring::thresholds::ThresholdConfig;
+use std::time::Duration;
+
+let config = ThresholdConfig {
+    // ... threshold configuration ...
+};
+
+let dashboard = Dashboard::new(config, Duration::from_secs(1));
+```
+
+Usage
+-----
+
+1. Initialization
+```rust
+let dashboard = Dashboard::new(config, Duration::from_secs(1));
+dashboard.start_update_loop().await;
+```
+
+2. Updating Metrics
+```rust
+dashboard.update_metrics(&health_metrics, &perf_metrics).await;
+```
+
+3. Retrieving Metrics
+```rust
+let metrics = dashboard.get_metrics().await;
+```
+
+4. Managing Alerts
+```rust
+// Resolve an alert
+dashboard.resolve_alert("alert_id").await;
+```
+
+Components
+---------
+1. System Health
+   - CPU Usage
+   - Memory Usage
+   - Disk Usage
+   - Error Rate
+   - API Status
+   - Database Status
+
+2. Performance Metrics
+   - API Error Rate
+   - Database Error Rate
+   - API Response Time
+   - Database Query Time
+   - ML Inference Time
+
+3. Trading Statistics
+   - Win Rate
+   - Drawdown
+   - Total Profit
+   - Total Loss
+   - Position Size
+
+4. Alerts
+   - System Alerts
+   - Performance Alerts
+   - Trading Alerts
+   - Alert Priority
+   - Alert Resolution
+
+Features
+--------
+1. Real-time Updates
+   - Configurable update interval
+   - Asynchronous updates
+   - Thread-safe data access
+
+2. Alert Management
+   - Automatic alert generation
+   - Alert resolution
+   - Priority levels
+   - Alert history
+
+3. Metric Tracking
+   - System health monitoring
+   - Performance tracking
+   - Trading statistics
+   - Historical data
+
+4. Integration
+   - Threshold manager integration
+   - Health monitoring system
+   - Performance monitoring
+   - Trading system
+
+Best Practices
+-------------
+1. Set appropriate update intervals
+2. Monitor alert frequency
+3. Track system resources
+4. Maintain alert history
+5. Regular metric validation
+6. Proper error handling
+
+Error Handling
+------------
+- All operations are async
+- Thread-safe data access
+- Error logging
+- Graceful degradation
+- Alert prioritization
+
+Testing
+-------
+The module includes tests for:
+- Dashboard creation
+- Metric updates
+- Alert management
+- Data consistency
+- Thread safety
+
+Dependencies
+-----------
+- tokio: Async runtime
+- serde: Serialization
+- std::sync: Thread safety
+- std::time: Time handling
+- log: Logging
+
+Troubleshooting
+--------------
+1. Check update intervals
+2. Monitor system resources
+3. Review alert history
+4. Check data consistency
+5. Verify thread safety
+6. Review error logs
+
+Support
+-------
+For additional support:
+1. Review error logs
+2. Check configuration
+3. Monitor system resources
+4. Contact system administrator 

@@ -1,0 +1,119 @@
+YubiKey Integration Documentation
+==============================
+
+Overview
+--------
+The YubiKey integration module provides secure two-factor authentication using YubiKey OTP (One-Time Password) validation. It interfaces with the YubiKey API to verify OTPs and enhance security.
+
+Components
+----------
+
+1. YubikeyManager
+   - Manages YubiKey API interactions
+   - Handles OTP validation
+   - Manages API credentials
+   - Implements request signing
+
+2. Request/Response Handling
+   - YubikeyRequest struct for API requests
+   - YubikeyResponse struct for API responses
+   - Nonce generation for request security
+   - Response validation
+
+3. OTP Validation Flow
+   - User submits OTP
+   - System generates nonce
+   - Request sent to YubiKey API
+   - Response validated
+   - Status returned to caller
+
+Usage
+-----
+
+1. Initialize Manager
+```rust
+let manager = YubikeyManager::new(
+    "client_id".to_string(),
+    "secret_key".to_string()
+);
+```
+
+2. Validate OTP
+```rust
+let otp = "ccccccbchvthvuvvkeegntgbfggncthucrtu";
+let result = manager.validate_otp(otp).await;
+```
+
+Configuration
+------------
+1. API Endpoint: https://api.yubico.com/wsapi/2.0/verify
+2. Client ID: Required for API access
+3. Secret Key: Required for request signing
+4. Timeout: 5 seconds
+5. Retry attempts: 3
+
+Security Features
+---------------
+1. Request signing
+2. Nonce generation
+3. Response validation
+4. Timeout handling
+5. Error handling
+6. Secure credential storage
+
+Error Handling
+-------------
+1. Invalid OTP format
+2. API communication errors
+3. Invalid response
+4. Timeout errors
+5. Invalid credentials
+6. Network errors
+
+Testing
+-------
+1. OTP validation
+2. Error cases
+3. Timeout handling
+4. Retry logic
+5. Response parsing
+6. Nonce generation
+
+Best Practices
+-------------
+1. Secure credential storage
+2. Proper error handling
+3. Request signing
+4. Response validation
+5. Timeout implementation
+6. Retry logic
+7. Logging
+8. Monitoring
+9. Rate limiting
+10. Input validation
+
+Integration
+-----------
+1. Authentication system
+2. Security manager
+3. Logging system
+4. Monitoring system
+5. Error handling system
+
+Maintenance
+-----------
+1. API updates
+2. Security patches
+3. Credential rotation
+4. Log monitoring
+5. Performance monitoring
+6. Error tracking
+
+Troubleshooting
+--------------
+1. Invalid OTP errors
+2. API communication issues
+3. Timeout problems
+4. Credential issues
+5. Network problems
+6. Response parsing errors 

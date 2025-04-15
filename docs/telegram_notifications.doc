@@ -1,0 +1,154 @@
+Telegram Notifications Documentation
+=================================
+
+Overview
+--------
+The Telegram notification system provides real-time alerts and notifications about system health, performance metrics, and trading events. It integrates with Telegram's Bot API to send formatted messages to specified chat groups.
+
+Prerequisites
+------------
+1. A Telegram bot token (obtained from @BotFather)
+2. A Telegram chat ID where notifications will be sent
+3. Internet connectivity to access Telegram's API
+
+Configuration
+------------
+```rust
+use your_crate::monitoring::telegram::{TelegramConfig, AlertThresholds};
+
+let config = TelegramConfig {
+    bot_token: "your_bot_token".to_string(),
+    chat_id: "your_chat_id".to_string(),
+    alert_thresholds: AlertThresholds {
+        cpu_usage: 90.0,
+        memory_usage: 90.0,
+        error_rate: 10.0,
+        api_error_rate: 5.0,
+        db_error_rate: 5.0,
+        trade_win_rate: 50.0,
+        ml_accuracy: 80.0,
+    },
+};
+```
+
+Usage
+-----
+
+1. Initialization
+```rust
+use your_crate::monitoring::telegram::TelegramNotifier;
+
+let mut notifier = TelegramNotifier::new(config);
+notifier.initialize().await?;
+```
+
+2. Sending Alerts
+```rust
+// Send a custom alert
+notifier.send_alert("⚠️ *System Alert*\nSomething important happened").await?;
+
+// Send health alerts
+notifier.send_health_alert(&health_metrics).await?;
+
+// Send performance alerts
+notifier.send_performance_alert(&perf_metrics).await?;
+
+// Send trade notifications
+notifier.send_trade_notification("trade123", true, 100.0).await?;
+
+// Send daily summary
+notifier.send_daily_summary(&health_metrics, &perf_metrics).await?;
+```
+
+Alert Types
+----------
+1. System Health Alerts
+   - High CPU usage
+   - High memory usage
+   - High error rate
+   - API connection issues
+   - Database connection issues
+   - Trading bot status
+
+2. Performance Alerts
+   - API error rate
+   - Database error rate
+   - Low trading win rate
+   - Low ML model accuracy
+
+3. Trade Notifications
+   - Trade completion
+   - Trade success/failure
+   - Profit/loss information
+
+4. Daily Summary
+   - System health metrics
+   - Trading performance
+   - API performance
+   - ML performance
+
+Alert Thresholds
+---------------
+- CPU Usage: 90%
+- Memory Usage: 90%
+- Error Rate: 10%
+- API Error Rate: 5%
+- Database Error Rate: 5%
+- Trade Win Rate: 50%
+- ML Accuracy: 80%
+
+Message Formatting
+----------------
+- Uses MarkdownV2 for formatting
+- Includes emojis for visual indicators
+- Structured sections for different metrics
+- Clear error messages
+- Formatted numbers and percentages
+
+Error Handling
+-------------
+- All operations return Result types
+- Connection errors are logged
+- Failed message sends are retried
+- Invalid configurations are caught early
+
+Testing
+-------
+The module includes tests for:
+- Initialization
+- Message sending
+- Alert thresholds
+- Error handling
+
+Dependencies
+-----------
+- teloxide: For Telegram Bot API
+- tokio: For async operations
+- serde: For configuration
+- log: For logging
+
+Best Practices
+-------------
+1. Keep bot token secure
+2. Use appropriate chat groups
+3. Set meaningful thresholds
+4. Handle errors gracefully
+5. Monitor message delivery
+6. Use async operations
+
+Troubleshooting
+--------------
+1. Check bot token validity
+2. Verify chat ID
+3. Check internet connectivity
+4. Review error logs
+5. Monitor message delivery
+6. Check rate limits
+
+Support
+-------
+For additional support:
+1. Review Telegram Bot API documentation
+2. Check error logs
+3. Monitor message delivery
+4. Contact system administrator 

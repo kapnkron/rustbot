@@ -1,0 +1,168 @@
+Performance Metrics Documentation
+==============================
+
+Overview
+--------
+The performance metrics module provides comprehensive tracking of various performance indicators for the trading bot. It monitors trading performance, API response times, database query performance, and ML model inference times.
+
+Components
+----------
+1. Trade Metrics
+   - Total trades
+   - Success/failure rates
+   - Profit/loss tracking
+   - Trade duration
+   - Win rate
+
+2. API Metrics
+   - Request counts
+   - Response times
+   - Error rates
+   - Average latency
+
+3. Database Metrics
+   - Query counts
+   - Query duration
+   - Slow query tracking
+   - Error rates
+
+4. ML Metrics
+   - Prediction counts
+   - Inference times
+   - Model accuracy
+   - Version tracking
+
+Usage
+-----
+
+1. Initialization
+```rust
+use your_crate::monitoring::performance::PerformanceMonitor;
+
+let monitor = PerformanceMonitor::new();
+```
+
+2. Tracking Trades
+```rust
+// Start tracking a trade
+monitor.start_trade("trade_id".to_string()).await;
+
+// End tracking and record results
+monitor.end_trade("trade_id".to_string(), true, 100.0).await?;
+```
+
+3. Tracking API Requests
+```rust
+// Start tracking an API request
+monitor.start_api_request("request_id".to_string()).await;
+
+// End tracking and record results
+monitor.end_api_request("request_id".to_string(), true).await?;
+```
+
+4. Tracking Database Queries
+```rust
+// Start tracking a database query
+monitor.start_db_query("query_id".to_string()).await;
+
+// End tracking and record results
+monitor.end_db_query("query_id".to_string(), true, false).await?;
+```
+
+5. Tracking ML Predictions
+```rust
+// Start tracking an ML prediction
+monitor.start_ml_prediction("prediction_id".to_string()).await;
+
+// End tracking and record results
+monitor.end_ml_prediction("prediction_id".to_string(), 0.95).await?;
+```
+
+6. Retrieving Metrics
+```rust
+let metrics = monitor.get_metrics().await;
+println!("Win Rate: {}%", metrics.trade_metrics.win_rate);
+println!("API Error Rate: {}%", metrics.api_metrics.error_rate);
+println!("Average Query Time: {:?}", metrics.db_metrics.average_query_time);
+println!("ML Accuracy: {}%", metrics.ml_metrics.prediction_accuracy * 100.0);
+```
+
+Metrics Structure
+----------------
+1. TradeMetrics
+   - total_trades: Total number of trades
+   - successful_trades: Number of successful trades
+   - failed_trades: Number of failed trades
+   - total_profit: Total profit from trades
+   - total_loss: Total loss from trades
+   - average_trade_duration: Average time per trade
+   - win_rate: Percentage of successful trades
+
+2. ApiMetrics
+   - total_requests: Total API requests
+   - failed_requests: Number of failed requests
+   - average_response_time: Average response time
+   - last_response_time: Last response time
+   - error_rate: Percentage of failed requests
+
+3. DbMetrics
+   - total_queries: Total database queries
+   - slow_queries: Number of slow queries
+   - average_query_time: Average query time
+   - last_query_time: Last query time
+   - error_rate: Percentage of failed queries
+
+4. MlMetrics
+   - total_predictions: Total ML predictions
+   - average_inference_time: Average prediction time
+   - last_inference_time: Last prediction time
+   - prediction_accuracy: Model accuracy
+   - model_version: Current model version
+
+Best Practices
+-------------
+1. Use unique IDs for tracking
+2. Always call end_* methods after start_* methods
+3. Handle errors appropriately
+4. Monitor metrics regularly
+5. Set up alerts for critical metrics
+6. Use async operations for performance
+
+Error Handling
+-------------
+- All operations return Result types
+- Missing IDs are handled gracefully
+- Errors are logged appropriately
+- Metrics are updated atomically
+
+Testing
+-------
+The module includes tests for:
+- Trade tracking
+- API request tracking
+- Database query tracking
+- ML prediction tracking
+- Metric calculations
+
+Dependencies
+-----------
+- tokio: For async operations
+- chrono: For timestamps
+- serde: For serialization
+- log: For logging
+
+Troubleshooting
+--------------
+1. Check for missing end_* calls
+2. Verify ID uniqueness
+3. Monitor error rates
+4. Check metric calculations
+5. Review performance impact
+
+Support
+-------
+For additional support:
+1. Review the test cases
+2. Check the error logs
+3. Monitor performance metrics
+4. Contact system administrator 

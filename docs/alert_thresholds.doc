@@ -1,0 +1,183 @@
+Alert Thresholds Documentation
+============================
+
+Overview
+--------
+The alert thresholds module provides a comprehensive system for managing and validating various types of alerts in the trading bot. It includes thresholds for system health, performance metrics, and trading parameters, along with notification settings to prevent alert fatigue.
+
+Configuration
+------------
+```rust
+use your_crate::monitoring::thresholds::{
+    ThresholdConfig,
+    SystemThresholds,
+    PerformanceThresholds,
+    TradeThresholds,
+    NotificationSettings,
+    AlertPriority
+};
+
+let config = ThresholdConfig {
+    system_thresholds: SystemThresholds {
+        cpu_usage: 90.0,
+        memory_usage: 90.0,
+        disk_usage: 90.0,
+        error_rate: 10.0,
+        api_timeout: Duration::from_secs(5),
+        db_timeout: Duration::from_secs(5),
+    },
+    performance_thresholds: PerformanceThresholds {
+        api_error_rate: 5.0,
+        db_error_rate: 5.0,
+        api_response_time: Duration::from_secs(1),
+        db_query_time: Duration::from_secs(1),
+        ml_inference_time: Duration::from_secs(1),
+    },
+    trade_thresholds: TradeThresholds {
+        win_rate: 50.0,
+        max_drawdown: 20.0,
+        max_position_size: 1000.0,
+        min_profit_per_trade: 10.0,
+        max_loss_per_trade: 100.0,
+        daily_loss_limit: 1000.0,
+    },
+    notification_settings: NotificationSettings {
+        alert_cooldown: Duration::from_secs(300),
+        max_alerts_per_hour: 12,
+        alert_priority: HashMap::new(),
+    },
+};
+```
+
+Usage
+-----
+
+1. Initialization
+```rust
+use your_crate::monitoring::thresholds::ThresholdManager;
+
+let manager = ThresholdManager::new(config);
+manager.validate_config()?;
+```
+
+2. Checking Thresholds
+```rust
+// Check system thresholds
+let system_alerts = manager.check_system_thresholds(&health_metrics);
+
+// Check performance thresholds
+let performance_alerts = manager.check_performance_thresholds(&perf_metrics);
+
+// Check trade thresholds
+let trade_alerts = manager.check_trade_thresholds(&perf_metrics);
+```
+
+3. Managing Alerts
+```rust
+// Check if an alert should be sent
+if manager.should_send_alert("high_cpu_usage") {
+    // Send alert
+}
+
+// Get alert priority
+let priority = manager.get_alert_priority("high_cpu_usage");
+```
+
+Threshold Types
+-------------
+1. System Thresholds
+   - CPU Usage: 90%
+   - Memory Usage: 90%
+   - Disk Usage: 90%
+   - Error Rate: 10%
+   - API Timeout: 5 seconds
+   - DB Timeout: 5 seconds
+
+2. Performance Thresholds
+   - API Error Rate: 5%
+   - DB Error Rate: 5%
+   - API Response Time: 1 second
+   - DB Query Time: 1 second
+   - ML Inference Time: 1 second
+
+3. Trade Thresholds
+   - Win Rate: 50%
+   - Max Drawdown: 20%
+   - Max Position Size: 1000.0
+   - Min Profit per Trade: 10.0
+   - Max Loss per Trade: 100.0
+   - Daily Loss Limit: 1000.0
+
+Notification Settings
+-------------------
+- Alert Cooldown: 5 minutes
+- Max Alerts per Hour: 12
+- Alert Priority Levels:
+  - Low
+  - Medium
+  - High
+  - Critical
+
+Validation Rules
+--------------
+1. Percentage-based thresholds cannot exceed 100%
+2. Time-based thresholds must be positive
+3. Trade thresholds must be reasonable
+4. Alert cooldown must be positive
+5. Max alerts per hour must be positive
+
+Integration
+----------
+The threshold manager integrates with:
+- Health monitoring system
+- Performance monitoring system
+- Trading system
+- Notification system
+
+Error Handling
+------------
+- All operations return Result types
+- Invalid configurations are caught early
+- Threshold violations are logged
+- Alert rate limiting is enforced
+
+Testing
+-------
+The module includes tests for:
+- Configuration validation
+- Threshold checking
+- Alert management
+- Priority handling
+
+Dependencies
+-----------
+- serde: For configuration
+- log: For logging
+- std::time: For duration handling
+- std::collections: For HashMap
+
+Best Practices
+-------------
+1. Set appropriate thresholds
+2. Use alert cooldowns
+3. Implement priority levels
+4. Monitor alert frequency
+5. Validate configurations
+6. Handle errors gracefully
+
+Troubleshooting
+--------------
+1. Check threshold values
+2. Verify alert cooldowns
+3. Monitor alert frequency
+4. Review error logs
+5. Check configuration
+6. Validate priorities
+
+Support
+-------
+For additional support:
+1. Review error logs
+2. Check configuration
+3. Monitor alert frequency
+4. Contact system administrator 

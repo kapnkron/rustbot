@@ -1,0 +1,100 @@
+YubiKey Integration Module Documentation
+=====================================
+
+Overview
+--------
+The YubiKey integration module provides functionality to validate YubiKey OTP (One-Time Password) tokens. This module implements the YubiKey validation protocol version 2.0 and communicates with the YubiKey validation server.
+
+Prerequisites
+------------
+1. A valid YubiKey device
+2. YubiKey API credentials (Client ID and Secret Key)
+3. Internet connectivity to access the YubiKey validation server
+
+Usage
+-----
+
+1. Initialization
+```rust
+use your_crate::security::yubikey::YubikeyManager;
+
+// Initialize the YubiKey manager with your credentials
+let manager = YubikeyManager::new(
+    "your_client_id".to_string(),
+    "your_secret_key".to_string(),
+)?;
+```
+
+2. Validating OTP
+```rust
+// Validate a YubiKey OTP
+let is_valid = manager.validate_otp("your_otp_here").await?;
+if is_valid {
+    println!("OTP is valid");
+} else {
+    println!("OTP is invalid");
+}
+```
+
+Error Handling
+-------------
+The module returns a Result type that can contain various errors:
+- Network errors
+- Invalid OTP format
+- Server validation errors
+- Configuration errors
+
+Always handle these errors appropriately in your application.
+
+Security Considerations
+---------------------
+1. Keep your YubiKey API credentials secure
+2. Implement rate limiting to prevent brute force attacks
+3. Use HTTPS for all communications
+4. Store credentials in environment variables or secure configuration management
+
+Testing
+-------
+The module includes basic tests that verify initialization. For full testing:
+1. Configure your YubiKey API credentials
+2. Use a real YubiKey device to generate OTPs
+3. Test both valid and invalid OTP scenarios
+
+Dependencies
+-----------
+- reqwest: For HTTP communication
+- serde: For serialization/deserialization
+- chrono: For timestamp generation
+- rand: For nonce generation
+- log: For logging
+
+Example Implementation
+--------------------
+```rust
+use your_crate::security::yubikey::YubikeyManager;
+
+async fn authenticate_user(otp: &str) -> Result<bool> {
+    let manager = YubikeyManager::new(
+        std::env::var("YUBIKEY_CLIENT_ID")?,
+        std::env::var("YUBIKEY_SECRET_KEY")?,
+    )?;
+    
+    manager.validate_otp(otp).await
+}
+```
+
+Troubleshooting
+--------------
+1. Check your internet connectivity
+2. Verify your API credentials
+3. Ensure the OTP format is correct
+4. Check server response status
+5. Review logs for detailed error messages
+
+Support
+-------
+For additional support:
+1. Refer to the YubiKey documentation
+2. Check the module's error messages
+3. Review the test cases
+4. Contact your system administrator 
