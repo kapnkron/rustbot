@@ -1,8 +1,8 @@
 use crate::api::{MarketData as ApiMarketData, Quote, ApiError, RateLimiter};
 use crate::utils::cache::Cache;
-use crate::utils::error::{Result, Error};
+use crate::error::{Result, Error};
 use chrono::{DateTime, Utc};
-use log::{info};
+use log::info;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};

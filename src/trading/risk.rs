@@ -1,5 +1,5 @@
-use crate::utils::error::Result;
-use crate::utils::error::Error;
+use crate::error::Result;
+use crate::error::Error;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

@@ -1,11 +1,14 @@
-use crate::utils::error::Result;
-use crate::trading::{MarketData, TradingSignal, TradingBot};
+use crate::api::MarketData;
+use crate::trading::{TradingSignal, TradingBot};
+use crate::error::Result;
 use teloxide::prelude::*;
 use teloxide::types::{Message, ParseMode};
 use teloxide::utils::command::BotCommands;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{info, error};
+use chrono::{DateTime, Utc};
+use serde::{Serialize, Deserialize};
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -20,6 +23,8 @@ pub enum Command {
     History,
     #[command(description = "Get bot status")]
     Status,
+    #[command(description = "Get backtesting results")]
+    Backtest,
     #[command(description = "Display this help message")]
     Help,
 }
@@ -59,24 +64,28 @@ impl TelegramBot {
     }
 
     pub async fn send_market_data(&self, data: &MarketData) -> Result<()> {
+        let price_change_emoji = if data.price_change_24h >= 0.0 { "📈" } else { "📉" };
+        let volume_change_emoji = if data.volume_change_24h >= 0.0 { "🔼" } else { "🔽" };
+        
         let message = format!(
-            "📊 Market Data for {}\n\
-            Price: ${:.2}\n\
-            Volume: ${:.2}\n\
-            Market Cap: ${:.2}\n\
-            24h Change: {:.2}%\n\
-            24h Volume Change: {:.2}%",
+            "📊 *Market Data for {}*\n\n\
+            💵 Price: ${:.2} {}\n\
+            📊 24h Change: {:.2}%\n\
+            💰 Market Cap: ${:.2}\n\
+            📈 Volume: ${:.2}\n\
+            🔄 24h Volume Change: {:.2}%",
             data.symbol,
             data.price,
-            data.volume,
-            data.market_cap,
+            price_change_emoji,
             data.price_change_24h,
+            data.market_cap,
+            data.volume,
             data.volume_change_24h
         );
 
         self.bot
             .send_message(self.chat_id, message)
-            .parse_mode(ParseMode::Html)
+            .parse_mode(ParseMode::MarkdownV2)
             .await?;
 
         Ok(())
@@ -112,6 +121,62 @@ impl TelegramBot {
 
     pub async fn is_trading_enabled(&self) -> bool {
         *self.trading_enabled.lock().await
+    }
+
+    pub async fn send_backtest_results(&self, results: &BacktestResult) -> Result<()> {
+        let message = format!(
+            "📊 *Backtest Results*\n\n\
+            💰 Initial Balance: ${:.2}\n\
+            💵 Final Balance: ${:.2}\n\
+            📈 Total PnL: ${:.2} ({:.2}%)\n\n\
+            📊 *Performance Metrics*\n\
+            ✅ Win Rate: {:.2}%\n\
+            📊 Total Trades: {}\n\
+            ✅ Winning Trades: {}\n\
+            ❌ Losing Trades: {}\n\
+            📉 Max Drawdown: {:.2}%\n\
+            📊 Sharpe Ratio: {:.2}\n\n\
+            *Recent Trades*\n{}",
+            results.initial_balance,
+            results.initial_balance + results.total_pnl,
+            results.total_pnl,
+            (results.total_pnl / results.initial_balance) * 100.0,
+            results.win_rate * 100.0,
+            results.total_trades,
+            results.winning_trades,
+            results.losing_trades,
+            results.max_drawdown * 100.0,
+            results.sharpe_ratio,
+            self.format_recent_trades(&results.trades)
+        );
+
+        self.bot
+            .send_message(self.chat_id, message)
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
+
+        Ok(())
+    }
+
+    fn format_recent_trades(&self, trades: &[Trade]) -> String {
+        trades.iter()
+            .rev()
+            .take(5) // Show last 5 trades
+            .map(|trade| {
+                let pnl_emoji = if trade.pnl >= 0.0 { "✅" } else { "❌" };
+                format!(
+                    "{} {} {} @ ${:.2} → ${:.2} (PnL: ${:.2}, {:.2}%)",
+                    pnl_emoji,
+                    trade.symbol,
+                    trade.entry_time.format("%Y-%m-%d %H:%M"),
+                    trade.entry_price,
+                    trade.exit_price,
+                    trade.pnl,
+                    trade.pnl_percentage
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -174,6 +239,38 @@ async fn command_handler(
         Command::History => {
             // Implement history retrieval
             bot.send_message(msg.chat.id, "History retrieval not implemented").await?;
+        }
+        Command::Backtest => {
+            if let Ok(results) = trading_bot.lock().await.get_backtest_results().await {
+                let message = format!(
+                    "📊 *Backtest Results*\n\n\
+                    💰 Initial Balance: ${:.2}\n\
+                    💵 Final Balance: ${:.2}\n\
+                    📈 Total PnL: ${:.2} ({:.2}%)\n\n\
+                    📊 *Performance Metrics*\n\
+                    ✅ Win Rate: {:.2}%\n\
+                    📊 Total Trades: {}\n\
+                    ✅ Winning Trades: {}\n\
+                    ❌ Losing Trades: {}\n\
+                    📉 Max Drawdown: {:.2}%\n\
+                    📊 Sharpe Ratio: {:.2}",
+                    results.initial_balance,
+                    results.initial_balance + results.total_pnl,
+                    results.total_pnl,
+                    (results.total_pnl / results.initial_balance) * 100.0,
+                    results.win_rate * 100.0,
+                    results.total_trades,
+                    results.winning_trades,
+                    results.losing_trades,
+                    results.max_drawdown * 100.0,
+                    results.sharpe_ratio
+                );
+                bot.send_message(msg.chat.id, message)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
+            } else {
+                bot.send_message(msg.chat.id, "Failed to fetch backtest results").await?;
+            }
         }
         Command::Help => {
             bot.send_message(

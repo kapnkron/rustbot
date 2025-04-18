@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use ring::{aead, rand};
 use std::path::Path;
 use log::{info, warn};

@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;

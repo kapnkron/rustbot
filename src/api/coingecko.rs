@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use crate::api::{MarketData as CommonMarketData, Quote};
 use crate::api::types::USDData;
 use crate::api::RateLimiter;
-use crate::utils::error::{Result, Error};
+use crate::error::{Result, Error};
 use std::collections::HashMap;
 
 const API_BASE_URL: &str = "https://api.coingecko.com/api/v3";

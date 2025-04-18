@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use crate::models::market::TokenData;
-use crate::utils::error::{Result, Error};
+use crate::error::{Result, Error};
 use log::{error, info};
+use crate::trading::TradingMarketData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketData {
@@ -95,89 +96,37 @@ impl TryFrom<MarketData> for TokenData {
     }
 }
 
-impl TryFrom<TokenData> for MarketData {
-    type Error = Error;
-
-    fn try_from(token_data: TokenData) -> Result<MarketData> {
-        let now = Utc::now();
-        info!("Starting TokenData to MarketData conversion for symbol: {} at {}", 
-            token_data.symbol, 
-            now.format("%Y-%m-%d %H:%M:%S%.3f"));
-
-        // Log input data for debugging
-        info!("Input TokenData - Price: {:.8}, Volume: {:.2}, Market Cap: {:.2}, Timestamp: {}", 
-            token_data.price, 
-            token_data.volume_24h, 
-            token_data.market_cap,
-            token_data.last_updated.format("%Y-%m-%d %H:%M:%S%.3f"));
-
-        // Validate required fields
-        if token_data.symbol.is_empty() {
-            let err_msg = "Empty symbol in TokenData";
-            error!("{} - Symbol: '{}', Timestamp: {}", 
-                err_msg, 
-                token_data.symbol, 
-                now.format("%Y-%m-%d %H:%M:%S%.3f"));
-            return Err(Error::ApiInvalidData(err_msg.to_string()));
+impl From<MarketData> for TradingMarketData {
+    fn from(data: MarketData) -> TradingMarketData {
+        TradingMarketData {
+            symbol: data.symbol,
+            price: data.price,
+            volume: data.volume,
+            market_cap: data.market_cap,
+            price_change_24h: data.price_change_24h,
+            volume_change_24h: data.volume_change_24h,
+            timestamp: data.timestamp,
+            volume_24h: data.volume_24h,
+            change_24h: data.change_24h,
+            quote: data.quote,
         }
-        if !token_data.price.is_finite() || token_data.price <= 0.0 {
-            let err_msg = format!("Invalid price in TokenData: {}", token_data.price);
-            error!("{} - Symbol: {}, Current Price: {:.8}, Timestamp: {}", 
-                err_msg, 
-                token_data.symbol,
-                token_data.price,
-                now.format("%Y-%m-%d %H:%M:%S%.3f"));
-            return Err(Error::ApiInvalidData(err_msg));
-        }
-        if !token_data.volume_24h.is_finite() || token_data.volume_24h < 0.0 {
-            let err_msg = format!("Invalid volume in TokenData: {}", token_data.volume_24h);
-            error!("{} - Symbol: {}, Current Volume: {:.2}, Timestamp: {}", 
-                err_msg, 
-                token_data.symbol,
-                token_data.volume_24h,
-                now.format("%Y-%m-%d %H:%M:%S%.3f"));
-            return Err(Error::ApiInvalidData(err_msg));
-        }
-        if !token_data.market_cap.is_finite() || token_data.market_cap < 0.0 {
-            let err_msg = format!("Invalid market cap in TokenData: {}", token_data.market_cap);
-            error!("{} - Symbol: {}, Current Market Cap: {:.2}, Timestamp: {}", 
-                err_msg, 
-                token_data.symbol,
-                token_data.market_cap,
-                now.format("%Y-%m-%d %H:%M:%S%.3f"));
-            return Err(Error::ApiInvalidData(err_msg));
-        }
+    }
+}
 
-        // Log successful conversion with detailed output
-        let result = MarketData {
-            symbol: token_data.symbol.clone(),
-            price: token_data.price,
-            volume: token_data.volume_24h,
-            market_cap: token_data.market_cap,
-            price_change_24h: 0.0,
-            volume_change_24h: 0.0,
-            timestamp: token_data.last_updated,
-            volume_24h: token_data.volume_24h,
-            change_24h: 0.0,
-            quote: Quote {
-                usd: USDData {
-                    price: token_data.price,
-                    volume_24h: token_data.volume_24h,
-                    market_cap: token_data.market_cap,
-                    percent_change_24h: 0.0,
-                    volume_change_24h: 0.0,
-                }
-            }
-        };
-
-        info!("Successfully converted TokenData to MarketData - Symbol: {}, Price: {:.8}, Volume: {:.2}, Market Cap: {:.2}, Timestamp: {}", 
-            result.symbol,
-            result.price,
-            result.volume_24h,
-            result.market_cap,
-            result.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"));
-
-        Ok(result)
+impl From<TradingMarketData> for MarketData {
+    fn from(data: TradingMarketData) -> MarketData {
+        MarketData {
+            symbol: data.symbol,
+            price: data.price,
+            volume: data.volume,
+            market_cap: data.market_cap,
+            price_change_24h: data.price_change_24h,
+            volume_change_24h: data.volume_change_24h,
+            timestamp: data.timestamp,
+            volume_24h: data.volume_24h,
+            change_24h: data.change_24h,
+            quote: data.quote,
+        }
     }
 }
 

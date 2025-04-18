@@ -3803,6 +3803,7 @@ dependencies = [
  "sysinfo",
  "tch",
  "teloxide",
+ "tempfile",
  "test-log",
  "thiserror",
  "tokio",

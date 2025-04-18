@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::{Result, Error};
 use ring::rand::SecureRandom;
 use ring::digest;
 use serde::{Deserialize, Serialize};
@@ -80,7 +80,7 @@ impl ApiKeyManager {
         Ok(())
     }
 
-    pub async fn generate_new_api_key(&mut self, user_id: &str) -> Result<String> {
+    pub async fn generate_key(&mut self, user_id: &str) -> Result<String> {
         let mut rng = ring::rand::SystemRandom::new();
         let mut key_bytes = [0u8; 32];
         rng.fill(&mut key_bytes)?;
@@ -122,20 +122,20 @@ impl ApiKeyManager {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_api_key_manager() -> Result<()> {
-        let mut manager = ApiKeyManager::new(30)?;
+    #[tokio::test]
+    async fn test_api_key_manager() -> Result<()> {
+        let mut manager = ApiKeyManager::new(30).await?;
         
         // Test key generation
-        let key = manager.generate_new_api_key("test_user")?;
-        assert!(manager.validate_key(&key)?);
+        let key = manager.generate_key("test_user").await?;
+        assert!(manager.validate_key(&key).await?);
         
         // Test key revocation
-        manager.revoke_key(&key)?;
-        assert!(!manager.validate_key(&key)?);
+        manager.revoke_key(&key).await?;
+        assert!(!manager.validate_key(&key).await?);
         
         // Test key rotation
-        manager.rotate_keys()?;
+        manager.rotate_keys().await?;
         
         Ok(())
     }

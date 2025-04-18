@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};

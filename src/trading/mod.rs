@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -16,7 +16,7 @@ mod backtest;
 pub use backtest::{Backtester, BacktestResult, Trade};
 
 #[derive(Debug, Clone)]
-pub struct MarketData {
+pub struct TradingMarketData {
     pub symbol: String,
     pub price: f64,
     pub volume: f64,
@@ -73,7 +73,7 @@ impl TradingBot {
         }
     }
 
-    pub async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+    pub async fn get_market_data(&self, symbol: &str) -> Result<TradingMarketData> {
         let data = self.market_data_collector.lock().await.collect_market_data(symbol).await?;
         Ok(data.into())
     }
@@ -88,13 +88,13 @@ impl TradingBot {
             info!("Risk level set to {}", level);
             Ok(())
         } else {
-            Err(crate::utils::error::Error::ValidationError(
+            Err(crate::error::Error::ValidationError(
                 "Risk level must be between 0.0 and 1.0".to_string(),
             ))
         }
     }
 
-    pub async fn process_market_data(&self, data: MarketData) -> Result<Option<TradingSignal>> {
+    pub async fn process_market_data(&self, data: TradingMarketData) -> Result<Option<TradingSignal>> {
         if !*self.trading_enabled.lock().await {
             return Ok(None);
         }
@@ -177,26 +177,68 @@ mod tests {
 
     fn create_test_config() -> crate::config::Config {
         crate::config::Config {
-            trading: crate::config::TradingConfig {
-                min_order_size: 10.0,
-                max_order_size: 1000.0,
-                max_open_positions: 3,
-                risk_per_trade: 0.02,
-                max_drawdown: 0.1,
-                max_position_size: 1000.0,
-                max_risk_per_trade: 0.02,
-                max_daily_loss: 0.05,
-                stop_loss_percentage: 0.02,
-                risk_reward_ratio: 2.0,
+            api: crate::config::ApiConfig {
+                coingecko_api_key: "test".to_string(),
+                coinmarketcap_api_key: "test".to_string(),
+                cryptodatadownload_api_key: "test".to_string(),
             },
-            // ... other config fields ...
+            trading: crate::config::TradingConfig {
+                risk_level: 0.5,
+                max_position_size: 1000.0,
+                stop_loss_percentage: 0.02,
+                take_profit_percentage: 0.1,
+                trading_pairs: vec!["BTC/USD".to_string()],
+            },
+            monitoring: crate::config::MonitoringConfig {
+                enable_prometheus: false,
+                prometheus_port: 9090,
+                alert_thresholds: crate::config::AlertThresholds {
+                    price_change_threshold: 0.1,
+                    volume_threshold: 1000.0,
+                    error_rate_threshold: 0.05,
+                },
+            },
+            telegram: crate::config::TelegramConfig {
+                bot_token: "test".to_string(),
+                chat_id: "test".to_string(),
+                enable_notifications: true,
+            },
+            database: crate::config::DatabaseConfig {
+                url: "test".to_string(),
+                max_connections: 10,
+            },
+            security: crate::config::SecurityConfig {
+                enable_2fa: false,
+                api_key_rotation_days: 30,
+            },
+            ml: crate::config::MLConfig {
+                input_size: 9,
+                hidden_size: 20,
+                output_size: 2,
+                learning_rate: 0.001,
+                model_path: "model.pt".to_string(),
+                confidence_threshold: 0.7,
+                training_batch_size: 32,
+                training_epochs: 100,
+                window_size: 10,
+                min_data_points: 100,
+                validation_split: 0.2,
+                early_stopping_patience: 5,
+                save_best_model: true,
+                evaluation_window_size: 100,
+            },
         }
     }
 
     #[tokio::test]
     async fn test_position_management() {
         let config = create_test_config();
-        let mut bot = TradingBot::new(config.clone(), 10000.0);
+        let market_data_collector = MarketDataCollector::new(
+            config.api.coingecko_api_key.clone(),
+            config.api.coinmarketcap_api_key.clone(),
+            config.api.cryptodatadownload_api_key.clone(),
+        );
+        let mut bot = TradingBot::new(market_data_collector);
 
         // Test opening position
         let signal = TradingSignal {

@@ -1,9 +1,10 @@
-use crate::utils::error::Result;
-use crate::trading::{TradingBot, MarketData, TradingSignal, Position, SignalType};
+use crate::error::Result;
+use crate::trading::{TradingBot, TradingSignal, Position, SignalType};
+use crate::api::MarketData;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use log::info;
+use log::{info, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestResult {
@@ -190,6 +191,11 @@ mod tests {
     #[tokio::test]
     async fn test_backtest() {
         let config = crate::config::Config {
+            api: crate::config::ApiConfig {
+                coingecko_api_key: "test".to_string(),
+                coinmarketcap_api_key: "test".to_string(),
+                cryptodatadownload_api_key: "test".to_string(),
+            },
             trading: crate::config::TradingConfig {
                 risk_level: 0.02,
                 max_position_size: 1000.0,
@@ -197,25 +203,52 @@ mod tests {
                 take_profit_percentage: 0.04,
                 trading_pairs: vec!["BTC".to_string()],
             },
+            monitoring: crate::config::MonitoringConfig {
+                enable_prometheus: false,
+                prometheus_port: 9090,
+                alert_thresholds: crate::config::AlertThresholds {
+                    price_change_threshold: 0.1,
+                    volume_threshold: 1000.0,
+                    error_rate_threshold: 0.05,
+                },
+            },
+            telegram: crate::config::TelegramConfig {
+                bot_token: "test".to_string(),
+                chat_id: "test".to_string(),
+                enable_notifications: true,
+            },
+            database: crate::config::DatabaseConfig {
+                url: "test".to_string(),
+                max_connections: 10,
+            },
+            security: crate::config::SecurityConfig {
+                enable_2fa: false,
+                api_key_rotation_days: 30,
+            },
             ml: crate::config::MLConfig {
-                input_size: 9,
+                input_size: 10,
                 hidden_size: 20,
-                output_size: 2,
+                output_size: 1,
                 learning_rate: 0.001,
-                model_path: "model.pt".to_string(),
-                confidence_threshold: 0.7,
+                model_path: "test".to_string(),
+                confidence_threshold: 0.8,
                 training_batch_size: 32,
-                training_epochs: 100,
+                training_epochs: 10,
                 window_size: 10,
                 min_data_points: 100,
                 validation_split: 0.2,
-                early_stopping_patience: 5,
+                early_stopping_patience: 3,
                 save_best_model: true,
+                evaluation_window_size: 10,
             },
-            // ... other config fields ...
         };
 
-        let bot = TradingBot::new(config, 10000.0);
+        let market_data_collector = MarketDataCollector::new(
+            config.api.coingecko_api_key.clone(),
+            config.api.coinmarketcap_api_key.clone(),
+            config.api.cryptodatadownload_api_key.clone(),
+        );
+        let bot = TradingBot::new(market_data_collector);
         let mut backtester = Backtester::new(bot, 10000.0);
 
         // Create test market data

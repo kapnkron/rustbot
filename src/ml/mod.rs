@@ -1,8 +1,8 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use tch::{Device, Kind, Tensor};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::trading::MarketData;
+use crate::trading::TradingMarketData;
 use crate::config::MLConfig;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
@@ -73,11 +73,11 @@ impl TradingModel {
         Ok(())
     }
 
-    pub fn process_market_data(&mut self, data: &MarketData) -> Result<Vec<f64>> {
+    pub fn process_market_data(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
         self.preprocessor.process_market_data(data)
     }
 
-    pub fn predict(&self, data: &MarketData) -> Result<Vec<f64>> {
+    pub fn predict(&self, data: &TradingMarketData) -> Result<Vec<f64>> {
         use tch::nn::ModuleT;
         let features = self.preprocessor.process_market_data(data)?;
         let input = Tensor::f_from_slice(&features)?;
@@ -91,7 +91,7 @@ impl TradingModel {
         Ok(result)
     }
 
-    pub async fn train(&mut self, data: &[MarketData]) -> Result<()> {
+    pub async fn train(&mut self, data: &[TradingMarketData]) -> Result<()> {
         use tch::nn::{ModuleT, OptimizerConfig};
         let (features, labels) = self.prepare_training_data(data)?;
         
@@ -165,21 +165,19 @@ impl TradingModel {
         metrics_map.insert("f1_score".to_string(), metrics.f1_score);
         metrics_map.insert("roc_auc".to_string(), metrics.roc_auc);
 
-        let mut hyperparameters = HashMap::new();
-        hyperparameters.insert("learning_rate".to_string(), self.config.learning_rate.to_string());
-        hyperparameters.insert("batch_size".to_string(), self.config.training_batch_size.to_string());
-        hyperparameters.insert("hidden_size".to_string(), self.config.hidden_size.to_string());
+        let version = ModelVersion {
+            version: "1.0.0".to_string(), // This should be incremented properly
+            timestamp: Utc::now(),
+            metrics: metrics_map,
+            input_size: self.config.input_size,
+            hidden_size: self.config.hidden_size,
+            output_size: self.config.output_size,
+            learning_rate: self.config.learning_rate,
+            window_size: self.config.window_size,
+        };
 
         let mut version_manager = self.version_manager.lock().await;
-        version_manager.create_version(
-            metrics_map,
-            Path::new(&self.config.model_path),
-            self.config.training_batch_size,
-            self.config.features.clone(),
-            hyperparameters,
-        )?;
-
-        version_manager.increment_version();
+        version_manager.add_version(version)?;
         Ok(())
     }
 
@@ -193,7 +191,7 @@ impl TradingModel {
         version_manager.compare_versions(version1, version2)
     }
 
-    fn prepare_training_data(&mut self, data: &[MarketData]) -> Result<(Vec<f64>, Vec<f64>)> {
+    fn prepare_training_data(&mut self, data: &[TradingMarketData]) -> Result<(Vec<f64>, Vec<f64>)> {
         let mut features = Vec::new();
         let mut labels = Vec::new();
         
@@ -218,15 +216,26 @@ mod tests {
     use super::*;
     use chrono::Utc;
 
-    fn create_test_market_data(price: f64, volume: f64, market_cap: f64) -> MarketData {
-        MarketData {
-            timestamp: Utc::now(),
+    fn create_test_market_data(price: f64, volume: f64, market_cap: f64) -> TradingMarketData {
+        TradingMarketData {
             symbol: "BTC".to_string(),
             price,
             volume,
             market_cap,
             price_change_24h: 0.0,
             volume_change_24h: 0.0,
+            timestamp: Utc::now(),
+            volume_24h: volume,
+            change_24h: 0.0,
+            quote: crate::api::types::Quote {
+                usd: crate::api::types::USDData {
+                    price,
+                    volume_24h: volume,
+                    market_cap,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            }
         }
     }
 
@@ -272,27 +281,43 @@ mod tests {
             hidden_size: 32,
             output_size: 2,
             learning_rate: 0.001,
-            batch_size: 32,
-            epochs: 10,
+            model_path: "test_model.pt".to_string(),
             confidence_threshold: 0.7,
+            training_batch_size: 32,
+            training_epochs: 10,
+            window_size: 10,
+            min_data_points: 100,
+            validation_split: 0.2,
+            early_stopping_patience: 5,
+            save_best_model: true,
             evaluation_window_size: 100,
-            // ... other config fields ...
         };
 
         let mut model = TradingModel::new(config).unwrap();
         
         // Test prediction and evaluation
-        let market_data = MarketData {
-            timestamp: Utc::now(),
+        let market_data = TradingMarketData {
             symbol: "BTC".to_string(),
             price: 50000.0,
             volume: 1000.0,
             market_cap: 1000000000.0,
-            price_change_24h: 0.05,
-            volume_change_24h: 0.1,
+            price_change_24h: 0.0,
+            volume_change_24h: 0.0,
+            timestamp: Utc::now(),
+            volume_24h: 1000.0,
+            change_24h: 0.0,
+            quote: crate::api::types::Quote {
+                usd: crate::api::types::USDData {
+                    price: 50000.0,
+                    volume_24h: 1000.0,
+                    market_cap: 1000000000.0,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            }
         };
 
-        let prediction = model.predict(&market_data).await.unwrap();
+        let prediction = model.predict(&market_data).unwrap();
         assert!(prediction.len() == 2);
         assert!(prediction[0] >= 0.0 && prediction[0] <= 1.0);
         assert!(prediction[1] >= 0.0 && prediction[1] <= 1.0);
@@ -316,26 +341,40 @@ mod tests {
             hidden_size: 32,
             output_size: 2,
             learning_rate: 0.001,
-            batch_size: 32,
-            epochs: 10,
+            model_path: "test_model.pt".to_string(),
             confidence_threshold: 0.7,
+            training_batch_size: 32,
+            training_epochs: 10,
+            window_size: 10,
+            min_data_points: 100,
+            validation_split: 0.2,
+            early_stopping_patience: 5,
+            save_best_model: true,
             evaluation_window_size: 100,
-            model_path: "models".into(),
-            training_data_size: 1000,
-            features_used: vec!["price".to_string(), "volume".to_string()],
         };
 
         let mut model = TradingModel::new(config)?;
         
         // Test prediction and evaluation
-        let market_data = MarketData {
-            timestamp: Utc::now(),
+        let market_data = TradingMarketData {
             symbol: "BTC".to_string(),
             price: 50000.0,
             volume: 1000.0,
             market_cap: 1000000000.0,
-            price_change_24h: 0.05,
-            volume_change_24h: 0.1,
+            price_change_24h: 0.0,
+            volume_change_24h: 0.0,
+            timestamp: Utc::now(),
+            volume_24h: 1000.0,
+            change_24h: 0.0,
+            quote: crate::api::types::Quote {
+                usd: crate::api::types::USDData {
+                    price: 50000.0,
+                    volume_24h: 1000.0,
+                    market_cap: 1000000000.0,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            }
         };
 
         let prediction = model.predict(&market_data).await?;

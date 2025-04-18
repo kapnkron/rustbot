@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;

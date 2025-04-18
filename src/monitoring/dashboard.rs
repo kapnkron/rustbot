@@ -4,7 +4,8 @@ use crate::monitoring::performance::PerformanceMetrics;
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use chrono::{DateTime, Utc};
 use log::{info, warn, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,7 +14,7 @@ pub struct DashboardMetrics {
     pub performance: Performance,
     pub trading: Trading,
     pub alerts: Vec<Alert>,
-    pub last_updated: Instant,
+    pub last_updated: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +50,7 @@ pub struct Alert {
     pub id: String,
     pub message: String,
     pub priority: String,
-    pub timestamp: Instant,
+    pub timestamp: DateTime<Utc>,
     pub resolved: bool,
 }
 
@@ -86,7 +87,7 @@ impl Dashboard {
                     position_size: 0.0,
                 },
                 alerts: Vec::new(),
-                last_updated: Instant::now(),
+                last_updated: Utc::now(),
             })),
             threshold_manager: Arc::new(ThresholdManager::new(config)),
             update_interval,
@@ -130,7 +131,7 @@ impl Dashboard {
                 id: format!("system_{}", metrics.alerts.len()),
                 message: alert,
                 priority: "high".to_string(),
-                timestamp: Instant::now(),
+                timestamp: Utc::now(),
                 resolved: false,
             });
         }
@@ -140,7 +141,7 @@ impl Dashboard {
                 id: format!("perf_{}", metrics.alerts.len()),
                 message: alert,
                 priority: "medium".to_string(),
-                timestamp: Instant::now(),
+                timestamp: Utc::now(),
                 resolved: false,
             });
         }
@@ -150,12 +151,12 @@ impl Dashboard {
                 id: format!("trade_{}", metrics.alerts.len()),
                 message: alert,
                 priority: "critical".to_string(),
-                timestamp: Instant::now(),
+                timestamp: Utc::now(),
                 resolved: false,
             });
         }
 
-        metrics.last_updated = Instant::now();
+        metrics.last_updated = Utc::now();
     }
 
     pub async fn get_metrics(&self) -> DashboardMetrics {
@@ -180,7 +181,7 @@ impl Dashboard {
                 // For now, we'll just update the timestamp
                 {
                     let mut m = metrics.write().await;
-                    m.last_updated = Instant::now();
+                    m.last_updated = Utc::now();
                 }
                 tokio::time::sleep(update_interval).await;
             }

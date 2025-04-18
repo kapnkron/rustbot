@@ -1,4 +1,4 @@
-use crate::utils::error::{Result, Error};
+use crate::error::{Result, Error};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
@@ -6,7 +6,7 @@ use crate::api::types::{MarketData as CommonMarketData, Quote, USDData};
 use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketData {
+pub struct CryptoDataDownloadMarketData {
     pub price: f64,
     pub volume: f64,
     pub market_cap: f64,
@@ -14,8 +14,8 @@ pub struct MarketData {
     pub volume_change_24h: f64,
 }
 
-impl From<MarketData> for CommonMarketData {
-    fn from(data: MarketData) -> CommonMarketData {
+impl From<CryptoDataDownloadMarketData> for CommonMarketData {
+    fn from(data: CryptoDataDownloadMarketData) -> CommonMarketData {
         CommonMarketData {
             symbol: "".to_string(), // This will be set by the caller
             price: data.price,
@@ -72,7 +72,7 @@ impl CryptoDataDownloadClient {
         }
     }
 
-    pub async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+    pub async fn get_market_data(&self, symbol: &str) -> Result<CryptoDataDownloadMarketData> {
         let url = format!("{}/data/histoday", self.base_url);
         let params = [
             ("fsym", symbol),
@@ -104,7 +104,7 @@ impl CryptoDataDownloadClient {
 
         let latest_data = &data.data[0];
 
-        Ok(MarketData {
+        Ok(CryptoDataDownloadMarketData {
             price: latest_data.close,
             volume: latest_data.volume,
             market_cap: latest_data.market_cap,

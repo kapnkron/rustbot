@@ -1,4 +1,4 @@
-use crate::utils::error::Result;
+use crate::error::Result;
 use ring::rand::SecureRandom;
 use ring::{aead, digest, hmac, rand};
 use serde::{Deserialize, Serialize};
@@ -52,9 +52,8 @@ impl Default for SecurityConfig {
 }
 
 pub struct SecurityManager {
-    config: SecurityConfig,
     api_key_manager: Arc<Mutex<ApiKeyManager>>,
-    yubikey_manager: Option<Arc<Mutex<YubikeyManager>>>,
+    yubikey_manager: Arc<Mutex<YubikeyManager>>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     input_validator: Arc<Mutex<InputValidator>>,
     secure_storage: Arc<Mutex<SecureStorage>>,
@@ -62,36 +61,12 @@ pub struct SecurityManager {
 
 impl SecurityManager {
     pub async fn new(config: SecurityConfig) -> Result<Self> {
-        let api_key_manager = Arc::new(Mutex::new(ApiKeyManager::new(
-            config.api_key_rotation_days.into(),
-        ).await?));
-
-        let yubikey_manager = if config.yubikey_enabled {
-            Some(Arc::new(Mutex::new(YubikeyManager::new()?)))
-        } else {
-            None
-        };
-
-        let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(
-            config.rate_limit_requests,
-            Duration::from_secs(config.rate_limit_window_seconds),
-        )));
-
-        let input_validator = Arc::new(Mutex::new(InputValidator::new(
-            config.max_input_length,
-        )));
-
-        let secure_storage = Arc::new(Mutex::new(SecureStorage::new(
-            Path::new(&config.encryption_key_path),
-        )?));
-
         Ok(Self {
-            config,
-            api_key_manager,
-            yubikey_manager,
-            rate_limiter,
-            input_validator,
-            secure_storage,
+            api_key_manager: Arc::new(Mutex::new(ApiKeyManager::new(config.api_key_rotation_days as i64).await?)),
+            yubikey_manager: Arc::new(Mutex::new(YubikeyManager::new()?)),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(config.rate_limit_requests, Duration::from_secs(config.rate_limit_window_seconds))?)),
+            input_validator: Arc::new(Mutex::new(InputValidator::new(config.max_input_length)?)),
+            secure_storage: Arc::new(Mutex::new(SecureStorage::new(&config.encryption_key_path)?)),
         })
     }
 
@@ -119,13 +94,9 @@ impl SecurityManager {
         limiter.check_limit(ip).await
     }
 
-    pub async fn validate_yubikey(&self, otp: &str) -> Result<bool> {
-        if let Some(manager) = &self.yubikey_manager {
-            let manager = manager.lock().await;
-            manager.validate_otp(otp).await
-        } else {
-            Ok(true) // If YubiKey is not enabled, always return true
-        }
+    pub async fn verify_yubikey(&self, otp: &str) -> Result<bool> {
+        let manager = self.yubikey_manager.lock().await;
+        manager.validate_otp(otp).await
     }
 
     pub async fn validate_input(&self, input: &str) -> Result<bool> {
@@ -150,7 +121,7 @@ impl SecurityManager {
 
     pub async fn generate_new_api_key(&self, user_id: &str) -> Result<String> {
         let mut manager = self.api_key_manager.lock().await;
-        manager.generate_key(user_id)
+        manager.generate_key(user_id).await
     }
 
     pub async fn revoke_key(&self, key: &str) -> Result<()> {
@@ -166,18 +137,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_security_manager() -> Result<()> {
-        let config = SecurityConfig {
-            api_key_rotation_days: 30,
-            rate_limit_requests: 100,
-            rate_limit_window_seconds: 60,
-            max_input_length: 1000,
-            encryption_key_path: "test_key.pem".to_string(),
-            yubikey_enabled: false,
-            yubikey_client_id: "".to_string(),
-            yubikey_secret_key: "".to_string(),
-        };
-
-        let manager = SecurityManager::new(config)?;
+        let config = SecurityConfig::default();
+        let manager = SecurityManager::new(config).await?;
         
         // Test API key validation
         let api_key = manager.generate_new_api_key("test_user").await?;
@@ -185,16 +146,18 @@ mod tests {
         
         // Test rate limiting
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        assert!(manager.check_rate_limit(ip.to_string().as_str()).await?);
+        assert!(manager.check_rate_limit(&ip.to_string()).await?);
         
         // Test input validation
-        assert!(manager.validate_input("valid input").await?);
-        assert!(!manager.validate_input(&"a".repeat(2000)).await?);
+        let mut validator = manager.input_validator.lock().await;
+        assert!(validator.validate("valid input")?);
+        assert!(!validator.validate(&"a".repeat(2000))?);
         
         // Test encryption/decryption
+        let mut storage = manager.secure_storage.lock().await;
         let data = b"test data";
-        let encrypted = manager.encrypt_data(data).await?;
-        let decrypted = manager.decrypt_data(&encrypted).await?;
+        let encrypted = storage.encrypt(data)?;
+        let decrypted = storage.decrypt(&encrypted)?;
         assert_eq!(data, &decrypted[..]);
         
         Ok(())

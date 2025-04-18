@@ -8,7 +8,16 @@ use crate::config::{Config, MonitoringConfig, AlertThresholds};
 use crate::api::MarketDataCollector;
 use crate::trading::{TradingBot, Position};
 use crate::ml::TradingModel;
-use crate::utils::error::Result;
+use crate::error::Result;
+
+pub mod dashboard;
+pub mod thresholds;
+pub mod health;
+pub mod performance;
+pub use dashboard::Dashboard;
+pub use thresholds::{ThresholdManager, ThresholdConfig};
+pub use health::HealthMetrics;
+pub use performance::PerformanceMetrics;
 
 pub struct Monitor {
     config: MonitoringConfig,
