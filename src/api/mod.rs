@@ -1,16 +1,63 @@
 use crate::utils::error::Result;
-use crate::trading::MarketData;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use reqwest::Client;
-use log::{info, error};
-use crate::web::validation::RateLimiter;
+use std::time::{Duration, Instant};
+use log::error;
 
 pub mod coingecko;
 pub mod coinmarketcap;
 pub mod cryptodatadownload;
+pub mod types;
+
+pub use coingecko::CoinGeckoClient;
+pub use cryptodatadownload::CryptoDataDownloadClient;
+pub use types::{MarketData, Quote};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApiError {
+    #[error("API request failed: {0}")]
+    RequestError(String),
+    #[error("API rate limit exceeded: {0}")]
+    RateLimitExceeded(String),
+    #[error("API response validation failed: {0}")]
+    ValidationError(String),
+    #[error("API response format invalid: {0}")]
+    InvalidFormat(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct RateLimiter {
+    last_request: Arc<Mutex<Instant>>,
+    min_interval: Duration,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self {
+            last_request: Arc::new(Mutex::new(Instant::now())),
+            min_interval: Duration::from_millis(100), // 10 requests per second
+        }
+    }
+
+    pub async fn wait(&self) {
+        let mut last_request = self.last_request.lock().await;
+        let now = Instant::now();
+        let elapsed = now.duration_since(*last_request);
+        
+        if elapsed < self.min_interval {
+            tokio::time::sleep(self.min_interval - elapsed).await;
+        }
+        
+        *last_request = Instant::now();
+    }
+
+    pub async fn check(&self, _key: &str, interval: Duration) -> bool {
+        let now = Instant::now();
+        let elapsed = now.duration_since(*self.last_request.lock().await);
+        elapsed >= interval
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct MarketDataCollector {
@@ -25,16 +72,14 @@ impl MarketDataCollector {
         coinmarketcap_api_key: String,
         cryptodatadownload_api_key: String,
     ) -> Self {
-        let rate_limiter = Arc::new(Mutex::new(RateLimiter::new()));
-        
         Self {
             coingecko: Arc::new(Mutex::new(coingecko::CoinGeckoClient::new(
-                coingecko_api_key,
-                rate_limiter.clone(),
+                Some(coingecko_api_key),
+                Arc::new(Mutex::new(RateLimiter::new())),
             ))),
             coinmarketcap: Arc::new(Mutex::new(coinmarketcap::CoinMarketCapClient::new(
                 coinmarketcap_api_key,
-                rate_limiter.clone(),
+                Arc::new(Mutex::new(RateLimiter::new())),
             ))),
             cryptodatadownload: Arc::new(Mutex::new(cryptodatadownload::CryptoDataDownloadClient::new(
                 cryptodatadownload_api_key,
@@ -42,94 +87,95 @@ impl MarketDataCollector {
         }
     }
 
-    pub async fn collect_market_data(&self, symbol: &str) -> Result<MarketData> {
+    pub async fn collect_market_data(&self, symbol: &str) -> Result<types::MarketData> {
         // Collect data from all sources
-        let coingecko_data = self.coingecko.lock().await.get_market_data(symbol).await?;
-        let coinmarketcap_data = self.coinmarketcap.lock().await.get_market_data(symbol).await?;
-        let cryptodatadownload_data = self.cryptodatadownload.lock().await.get_market_data(symbol).await?;
+        let coingecko_data: types::MarketData = self.coingecko.lock().await.get_market_data(symbol).await?.into();
+        let coinmarketcap_data: types::MarketData = self.coinmarketcap.lock().await.get_market_data(symbol).await?.into();
+        let cryptodatadownload_data: types::MarketData = self.cryptodatadownload.lock().await.get_market_data(symbol).await?.into();
 
-        // Combine and validate data
-        let market_data = MarketData {
-            timestamp: Utc::now(),
+        // Calculate weighted averages
+        let price = self.calculate_weighted_price(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data);
+        let volume = self.calculate_weighted_volume(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data);
+        let market_cap = self.calculate_weighted_market_cap(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data);
+        let price_change_24h = self.calculate_weighted_price_change(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data);
+        let volume_change_24h = self.calculate_weighted_volume_change(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data);
+
+        Ok(types::MarketData {
             symbol: symbol.to_string(),
-            price: self.calculate_weighted_price(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data),
-            volume: self.calculate_weighted_volume(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data),
-            market_cap: self.calculate_weighted_market_cap(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data),
-            price_change_24h: self.calculate_weighted_price_change(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data),
-            volume_change_24h: self.calculate_weighted_volume_change(&coingecko_data, &coinmarketcap_data, &cryptodatadownload_data),
-        };
-
-        Ok(market_data)
+            price,
+            volume,
+            market_cap,
+            price_change_24h,
+            volume_change_24h,
+            timestamp: Utc::now(),
+            volume_24h: volume,
+            change_24h: price_change_24h,
+            quote: types::Quote {
+                usd: types::USDData {
+                    price,
+                    volume_24h: volume,
+                    market_cap,
+                    percent_change_24h: price_change_24h,
+                    volume_change_24h,
+                }
+            }
+        })
     }
 
     fn calculate_weighted_price(
         &self,
-        coingecko: &coingecko::MarketData,
-        coinmarketcap: &coinmarketcap::MarketData,
-        cryptodatadownload: &cryptodatadownload::MarketData,
+        coingecko: &types::MarketData,
+        coinmarketcap: &types::MarketData,
+        cryptodatadownload: &types::MarketData,
     ) -> f64 {
-        // Weight the prices based on reliability and volume
-        let weights = vec![0.4, 0.4, 0.2]; // Adjust weights based on reliability
-        let prices = vec![coingecko.price, coinmarketcap.price, cryptodatadownload.price];
-        
-        prices.iter().zip(weights.iter())
-            .map(|(price, weight)| price * weight)
-            .sum()
+        // Weighted average based on market cap
+        let total_market_cap = coingecko.market_cap + coinmarketcap.market_cap + cryptodatadownload.market_cap;
+        if total_market_cap == 0.0 {
+            return (coingecko.price + coinmarketcap.price + cryptodatadownload.price) / 3.0;
+        }
+
+        (coingecko.price * coingecko.market_cap + 
+         coinmarketcap.price * coinmarketcap.market_cap + 
+         cryptodatadownload.price * cryptodatadownload.market_cap) / total_market_cap
     }
 
     fn calculate_weighted_volume(
         &self,
-        coingecko: &coingecko::MarketData,
-        coinmarketcap: &coinmarketcap::MarketData,
-        cryptodatadownload: &cryptodatadownload::MarketData,
+        coingecko: &types::MarketData,
+        coinmarketcap: &types::MarketData,
+        cryptodatadownload: &types::MarketData,
     ) -> f64 {
-        // Use the highest volume as it's likely the most accurate
-        vec![coingecko.volume, coinmarketcap.volume, cryptodatadownload.volume]
-            .into_iter()
-            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .unwrap_or(0.0)
+        // Simple average since volume is more volatile
+        (coingecko.volume + coinmarketcap.volume + cryptodatadownload.volume) / 3.0
     }
 
     fn calculate_weighted_market_cap(
         &self,
-        coingecko: &coingecko::MarketData,
-        coinmarketcap: &coinmarketcap::MarketData,
-        cryptodatadownload: &cryptodatadownload::MarketData,
+        coingecko: &types::MarketData,
+        coinmarketcap: &types::MarketData,
+        cryptodatadownload: &types::MarketData,
     ) -> f64 {
-        // Use CoinGecko and CoinMarketCap data primarily for market cap
-        let weights = vec![0.5, 0.5, 0.0];
-        let market_caps = vec![coingecko.market_cap, coinmarketcap.market_cap, cryptodatadownload.market_cap];
-        
-        market_caps.iter().zip(weights.iter())
-            .map(|(cap, weight)| cap * weight)
-            .sum()
+        // Simple average since market cap is more stable
+        (coingecko.market_cap + coinmarketcap.market_cap + cryptodatadownload.market_cap) / 3.0
     }
 
     fn calculate_weighted_price_change(
         &self,
-        coingecko: &coingecko::MarketData,
-        coinmarketcap: &coinmarketcap::MarketData,
-        cryptodatadownload: &cryptodatadownload::MarketData,
+        coingecko: &types::MarketData,
+        coinmarketcap: &types::MarketData,
+        cryptodatadownload: &types::MarketData,
     ) -> f64 {
-        let weights = vec![0.4, 0.4, 0.2];
-        let changes = vec![coingecko.price_change_24h, coinmarketcap.price_change_24h, cryptodatadownload.price_change_24h];
-        
-        changes.iter().zip(weights.iter())
-            .map(|(change, weight)| change * weight)
-            .sum()
+        // Simple average since price changes are more volatile
+        (coingecko.price_change_24h + coinmarketcap.price_change_24h + cryptodatadownload.price_change_24h) / 3.0
     }
 
     fn calculate_weighted_volume_change(
         &self,
-        coingecko: &coingecko::MarketData,
-        coinmarketcap: &coinmarketcap::MarketData,
-        cryptodatadownload: &cryptodatadownload::MarketData,
+        coingecko: &types::MarketData,
+        coinmarketcap: &types::MarketData,
+        cryptodatadownload: &types::MarketData,
     ) -> f64 {
-        let weights = vec![0.4, 0.4, 0.2];
-        let changes = vec![coingecko.volume_change_24h, coinmarketcap.volume_change_24h, cryptodatadownload.volume_change_24h];
-        
-        changes.iter().zip(weights.iter())
-            .map(|(change, weight)| change * weight)
-            .sum()
+        // Simple average since volume changes are more volatile
+        (coingecko.volume_change_24h + coinmarketcap.volume_change_24h + cryptodatadownload.volume_change_24h) / 3.0
     }
 } 

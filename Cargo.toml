@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "A high-performance cryptocurrency trading bot with ML capabilities"
+build = "build.rs"
 
 [dependencies]
 # Async runtime
@@ -29,35 +30,55 @@ chrono = { version = "0.4", features = ["serde"] }
 # CLI
 clap = { version = "4.0", features = ["derive"] }
 
-# HTTP client
+# HTTP client (for API calls)
 reqwest = { version = "0.11", features = ["json"] }
 
 # Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
 
-# Web framework
-warp = "0.3"
-tokio-tungstenite = "0.20"
-
 # Cryptography
 ring = "0.17"
 rust-crypto = "0.2"
+base64 = "0.21"
+rand = "0.8"
+yubikey = "0.4"  # YubiKey hardware support
 
 # ML
-tch = "0.13"
+tch = "0.19.0"
 ndarray = "0.15"
 
 # Monitoring
 prometheus = "0.13"
 metrics = "0.21"
 
-# Telegram
-teloxide = "0.12"
+# Telegram bot
+teloxide = { version = "0.12", features = ["macros"] }
 
 # System metrics
 sysinfo = "0.29.0"
 
+# URL encoding
+serde_urlencoded = "0.7.1"
+
+# Regular expressions
+regex = "1.9"
+
+# Lazy static
+lazy_static = "1.4.0"
+
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = "0.11"
-test-log = { version = "0.2", features = ["trace"] } 
+test-log = { version = "0.2", features = ["trace"] }
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[package.metadata.deb]
+depends = "$auto, libykneomgr-dev"
+maintainer = "Your Name <your.email@example.com>"
+section = "utils"
+priority = "optional"
+
+[package.metadata.rpm]
+requires = ["libykneomgr-devel"] 

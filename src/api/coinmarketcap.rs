@@ -1,15 +1,13 @@
-use crate::models::market::TokenData;
-use crate::api::{MarketData, Quote, ApiError};
+use crate::api::{MarketData as ApiMarketData, Quote, ApiError, RateLimiter};
 use crate::utils::cache::Cache;
-use crate::utils::error::{Result, TradingError};
+use crate::utils::error::{Result, Error};
 use chrono::{DateTime, Utc};
-use log::{error, info, warn};
+use log::{info};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::web::validation::RateLimiter;
 
 const API_BASE_URL: &str = "https://pro-api.coinmarketcap.com/v1";
 const RATE_LIMIT: Duration = Duration::from_secs(1);
@@ -81,12 +79,6 @@ struct CoinMarketCapData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Quote {
-    #[serde(rename = "USD")]
-    usd: USDData,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct USDData {
     price: f64,
     volume_24h: f64,
@@ -95,6 +87,7 @@ struct USDData {
     volume_change_24h: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct CoinMarketCapClient {
     client: Client,
     api_key: String,
@@ -232,9 +225,9 @@ impl CoinMarketCapClient {
 
     pub async fn get_token_quote_from_symbol(&self, symbol: &str) -> Result<Quote> {
         // Check rate limit
-        let mut limiter = self.rate_limiter.lock().await;
-        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT) {
-            return Err(TradingError::RateLimitExceeded("API rate limit exceeded".to_string()));
+        let limiter = self.rate_limiter.lock().await;
+        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await {
+            return Err(Error::RateLimitExceeded("API rate limit exceeded".to_string()));
         }
 
         let url = format!("{}/cryptocurrency/quotes/latest", API_BASE_URL);
@@ -246,7 +239,7 @@ impl CoinMarketCapClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(ApiError::ApiError(format!(
+            return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
             )).into());
@@ -260,9 +253,9 @@ impl CoinMarketCapClient {
 
     pub async fn get_top_tokens_from_symbols(&self, symbols: &[&str]) -> Result<Vec<String>> {
         // Check rate limit
-        let mut limiter = self.rate_limiter.lock().await;
-        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT) {
-            return Err(TradingError::RateLimitExceeded("API rate limit exceeded".to_string()));
+        let limiter = self.rate_limiter.lock().await;
+        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await {
+            return Err(Error::RateLimitExceeded("API rate limit exceeded".to_string()));
         }
 
         let url = format!("{}/cryptocurrency/quotes/latest", API_BASE_URL);
@@ -274,7 +267,7 @@ impl CoinMarketCapClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(ApiError::ApiError(format!(
+            return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
             )).into());
@@ -284,7 +277,7 @@ impl CoinMarketCapClient {
         
         let tokens = data["data"]
             .as_array()
-            .ok_or_else(|| ApiError::InvalidResponse("No token data found".to_string()))?
+            .ok_or_else(|| ApiError::InvalidFormat("No token data found".to_string()))?
             .iter()
             .filter_map(|token| {
                 let symbol = token["symbol"].as_str()?;
@@ -295,7 +288,7 @@ impl CoinMarketCapClient {
         Ok(tokens)
     }
 
-    pub async fn get_market_data(&self, symbol: &str) -> Result<MarketData> {
+    pub async fn get_market_data(&self, symbol: &str) -> Result<ApiMarketData> {
         let url = format!("{}/cryptocurrency/quotes/latest", self.base_url);
         let params = [
             ("symbol", symbol),
@@ -310,7 +303,7 @@ impl CoinMarketCapClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(crate::utils::error::TradingError::ApiError(format!(
+            return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
             )).into());
@@ -319,19 +312,32 @@ impl CoinMarketCapClient {
         let data: CoinMarketCapResponse = response.json().await?;
         
         if data.data.is_empty() {
-            return Err(crate::utils::error::TradingError::ApiError(
+            return Err(Error::ApiError(
                 "No data returned from CoinMarketCap API".to_string()
             ).into());
         }
 
         let usd_data = &data.data[0].quote.usd;
 
-        Ok(MarketData {
+        Ok(ApiMarketData {
+            symbol: symbol.to_string(),
             price: usd_data.price,
             volume: usd_data.volume_24h,
             market_cap: usd_data.market_cap,
             price_change_24h: usd_data.percent_change_24h,
             volume_change_24h: usd_data.volume_change_24h,
+            timestamp: Utc::now(),
+            volume_24h: usd_data.volume_24h,
+            change_24h: usd_data.percent_change_24h,
+            quote: Quote {
+                usd: crate::api::types::USDData {
+                    price: usd_data.price,
+                    volume_24h: usd_data.volume_24h,
+                    market_cap: usd_data.market_cap,
+                    percent_change_24h: usd_data.percent_change_24h,
+                    volume_change_24h: usd_data.volume_change_24h,
+                }
+            }
         })
     }
 } 

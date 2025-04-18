@@ -1,0 +1,98 @@
+# Web Interface Documentation
+
+## Overview
+The web interface provides essential status and monitoring endpoints for the trading bot. It is designed to complement the primary Telegram interface rather than replace it.
+
+## Endpoints
+
+### 1. Status
+- **Endpoint**: `/status`
+- **Method**: GET
+- **Description**: Returns basic bot status information
+- **Response**:
+```json
+{
+    "status": "operational",
+    "version": "1.0.0",
+    "uptime": "2h 30m"
+}
+```
+
+### 2. Metrics
+- **Endpoint**: `/metrics`
+- **Method**: GET
+- **Description**: Returns current trading and system metrics
+- **Response**: DashboardMetrics object
+
+### 3. Alerts
+- **Endpoint**: `/alerts`
+- **Method**: GET
+- **Description**: Returns current active alerts
+- **Response**: Array of Alert objects
+
+### 4. Health
+- **Endpoint**: `/health`
+- **Method**: GET
+- **Description**: Returns system health status
+- **Response**: HealthStatus object
+
+## Security
+- All endpoints require API key authentication
+- Rate limiting is implemented
+- HTTPS is required for all connections
+
+## Usage
+
+### Starting the Server
+```rust
+let dashboard = Arc::new(Dashboard::new());
+let security_manager = Arc::new(SecurityManager::new());
+let server = WebServer::new(dashboard, security_manager);
+server.start("127.0.0.1", 8080).await?;
+```
+
+### Making Requests
+```bash
+# Get status
+curl -H "X-API-Key: your-api-key" https://your-domain/status
+
+# Get metrics
+curl -H "X-API-Key: your-api-key" https://your-domain/metrics
+
+# Get alerts
+curl -H "X-API-Key: your-api-key" https://your-domain/alerts
+
+# Get health
+curl -H "X-API-Key: your-api-key" https://your-domain/health
+```
+
+## Best Practices
+1. Always use HTTPS
+2. Rotate API keys regularly
+3. Monitor rate limits
+4. Implement proper error handling
+5. Keep the server updated
+6. Monitor server health
+7. Use appropriate logging levels
+8. Implement proper backup procedures
+
+## Troubleshooting
+1. Server not starting
+   - Check port availability
+   - Verify configuration
+   - Check system resources
+
+2. Authentication failures
+   - Verify API key
+   - Check key rotation
+   - Verify security settings
+
+3. High latency
+   - Check system resources
+   - Monitor network performance
+   - Review rate limiting settings
+
+4. Missing data
+   - Check dashboard status
+   - Verify metric collection
+   - Review alert settings 

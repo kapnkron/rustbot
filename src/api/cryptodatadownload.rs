@@ -1,7 +1,9 @@
-use crate::utils::error::Result;
+use crate::utils::error::{Result, Error};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::time::Duration;
+use crate::api::types::{MarketData as CommonMarketData, Quote, USDData};
+use chrono::Utc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketData {
@@ -10,6 +12,31 @@ pub struct MarketData {
     pub market_cap: f64,
     pub price_change_24h: f64,
     pub volume_change_24h: f64,
+}
+
+impl From<MarketData> for CommonMarketData {
+    fn from(data: MarketData) -> CommonMarketData {
+        CommonMarketData {
+            symbol: "".to_string(), // This will be set by the caller
+            price: data.price,
+            volume: data.volume,
+            market_cap: data.market_cap,
+            price_change_24h: data.price_change_24h,
+            volume_change_24h: data.volume_change_24h,
+            timestamp: Utc::now(),
+            volume_24h: data.volume,
+            change_24h: data.price_change_24h,
+            quote: Quote {
+                usd: USDData {
+                    price: data.price,
+                    volume_24h: data.volume,
+                    market_cap: data.market_cap,
+                    percent_change_24h: data.price_change_24h,
+                    volume_change_24h: data.volume_change_24h,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,6 +53,7 @@ struct CryptoDataDownloadData {
     volume_change_24h: f64,
 }
 
+#[derive(Debug, Clone)]
 pub struct CryptoDataDownloadClient {
     client: Client,
     api_key: String,
@@ -60,18 +88,18 @@ impl CryptoDataDownloadClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(crate::utils::error::TradingError::ApiError(format!(
+            return Err(Error::TradingError(format!(
                 "CryptoDataDownload API error: {}",
                 response.status()
-            )).into());
+            )));
         }
 
         let data: CryptoDataDownloadResponse = response.json().await?;
         
         if data.data.is_empty() {
-            return Err(crate::utils::error::TradingError::ApiError(
+            return Err(Error::TradingError(
                 "No data returned from CryptoDataDownload API".to_string()
-            ).into());
+            ));
         }
 
         let latest_data = &data.data[0];

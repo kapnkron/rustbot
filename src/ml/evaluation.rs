@@ -36,8 +36,8 @@ impl ModelEvaluator {
     pub fn new(window_size: usize) -> Self {
         Self {
             window_size,
-            predictions: VecDeque::with_capacity(window_size),
-            actual_moves: VecDeque::with_capacity(window_size),
+            predictions: VecDeque::new(),
+            actual_moves: VecDeque::new(),
             metrics: ModelMetrics {
                 accuracy: 0.0,
                 precision: 0.0,
@@ -164,55 +164,27 @@ impl ModelEvaluator {
     }
 
     fn calculate_roc_auc(&self, predicted: &[f64], actual: &[f64]) -> f64 {
-        let mut true_positive_rates = Vec::new();
-        let mut false_positive_rates = Vec::new();
-        
-        let thresholds: Vec<f64> = (0..=100)
-            .map(|i| i as f64 / 100.0)
-            .collect();
+        let mut points = predicted.iter()
+            .zip(actual.iter())
+            .map(|(p, a)| (*p, *a))
+            .collect::<Vec<_>>();
+        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-        for threshold in thresholds {
-            let mut true_positives = 0;
-            let mut false_positives = 0;
-            let mut actual_positives = 0;
-            let mut actual_negatives = 0;
-
-            for (&pred, &act) in predicted.iter().zip(actual.iter()) {
-                if act > 0.0 {
-                    actual_positives += 1;
-                    if pred >= threshold {
-                        true_positives += 1;
-                    }
-                } else {
-                    actual_negatives += 1;
-                    if pred >= threshold {
-                        false_positives += 1;
-                    }
-                }
-            }
-
-            let tpr = if actual_positives > 0 {
-                true_positives as f64 / actual_positives as f64
-            } else {
-                0.0
-            };
-
-            let fpr = if actual_negatives > 0 {
-                false_positives as f64 / actual_negatives as f64
-            } else {
-                0.0
-            };
-
-            true_positive_rates.push(tpr);
-            false_positive_rates.push(fpr);
-        }
-
-        // Calculate AUC using trapezoidal rule
         let mut auc = 0.0;
-        for i in 1..true_positive_rates.len() {
-            let width = false_positive_rates[i] - false_positive_rates[i-1];
-            let height = (true_positive_rates[i] + true_positive_rates[i-1]) / 2.0;
-            auc += width * height;
+        let mut prev_tpr = 0.0;
+        let mut prev_fpr = 0.0;
+
+        let total_positives = actual.iter().filter(|&&x| x > 0.5).count() as f64;
+        let total_negatives = actual.iter().filter(|&&x| x <= 0.5).count() as f64;
+
+        for (_, actual) in points {
+            let tpr = if actual > 0.5 { prev_tpr + 1.0 / total_positives } else { prev_tpr };
+            let fpr = if actual <= 0.5 { prev_fpr + 1.0 / total_negatives } else { prev_fpr };
+
+            auc += (tpr + prev_tpr) * (fpr - prev_fpr) / 2.0;
+
+            prev_tpr = tpr;
+            prev_fpr = fpr;
         }
 
         auc
@@ -220,6 +192,141 @@ impl ModelEvaluator {
 
     pub fn get_metrics(&self) -> &ModelMetrics {
         &self.metrics
+    }
+
+    pub fn calculate_metrics(&self, predicted: &[f64], actual: &[f64]) -> ModelMetrics {
+        let mut squared_errors = Vec::new();
+        let mut absolute_errors = Vec::new();
+
+        for (pred, act) in predicted.iter().zip(actual.iter()) {
+            let error = pred - act;
+            squared_errors.push(error * error);
+            absolute_errors.push(error.abs());
+        }
+
+        let mse = squared_errors.iter().sum::<f64>() / squared_errors.len() as f64;
+        let mae = absolute_errors.iter().sum::<f64>() / absolute_errors.len() as f64;
+
+        let accuracy = self.calculate_accuracy(predicted, actual);
+        let precision = self.calculate_precision(predicted, actual);
+        let recall = self.calculate_recall(predicted, actual);
+        let f1_score = self.calculate_f1_score(precision, recall);
+        let confusion_matrix = self.calculate_confusion_matrix(predicted, actual);
+        let roc_auc = self.calculate_roc_auc(predicted, actual);
+        let r2_score = self.calculate_r2_score(predicted, actual);
+
+        ModelMetrics {
+            accuracy,
+            precision,
+            recall,
+            f1_score,
+            confusion_matrix,
+            roc_auc,
+            mse,
+            mae,
+            r2_score,
+        }
+    }
+
+    fn calculate_accuracy(&self, predicted: &[f64], actual: &[f64]) -> f64 {
+        let mut correct = 0;
+        let total = predicted.len();
+
+        for (pred, act) in predicted.iter().zip(actual.iter()) {
+            if (pred > &0.5 && act > &0.5) || (pred <= &0.5 && act <= &0.5) {
+                correct += 1;
+            }
+        }
+
+        correct as f64 / total as f64
+    }
+
+    fn calculate_precision(&self, predicted: &[f64], actual: &[f64]) -> f64 {
+        let mut true_positives = 0;
+        let mut false_positives = 0;
+
+        for (pred, act) in predicted.iter().zip(actual.iter()) {
+            if pred > &0.5 {
+                if act > &0.5 {
+                    true_positives += 1;
+                } else {
+                    false_positives += 1;
+                }
+            }
+        }
+
+        if true_positives + false_positives == 0 {
+            0.0
+        } else {
+            true_positives as f64 / (true_positives + false_positives) as f64
+        }
+    }
+
+    fn calculate_recall(&self, predicted: &[f64], actual: &[f64]) -> f64 {
+        let mut true_positives = 0;
+        let mut false_negatives = 0;
+
+        for (pred, act) in predicted.iter().zip(actual.iter()) {
+            if act > &0.5 {
+                if pred > &0.5 {
+                    true_positives += 1;
+                } else {
+                    false_negatives += 1;
+                }
+            }
+        }
+
+        if true_positives + false_negatives == 0 {
+            0.0
+        } else {
+            true_positives as f64 / (true_positives + false_negatives) as f64
+        }
+    }
+
+    fn calculate_f1_score(&self, precision: f64, recall: f64) -> f64 {
+        if precision + recall == 0.0 {
+            0.0
+        } else {
+            2.0 * (precision * recall) / (precision + recall)
+        }
+    }
+
+    fn calculate_confusion_matrix(&self, predicted: &[f64], actual: &[f64]) -> ConfusionMatrix {
+        let mut matrix = ConfusionMatrix {
+            true_positives: 0,
+            true_negatives: 0,
+            false_positives: 0,
+            false_negatives: 0,
+        };
+
+        for (pred, act) in predicted.iter().zip(actual.iter()) {
+            if pred > &0.5 {
+                if act > &0.5 {
+                    matrix.true_positives += 1;
+                } else {
+                    matrix.false_positives += 1;
+                }
+            } else {
+                if act > &0.5 {
+                    matrix.false_negatives += 1;
+                } else {
+                    matrix.true_negatives += 1;
+                }
+            }
+        }
+
+        matrix
+    }
+
+    fn calculate_r2_score(&self, predicted: &[f64], actual: &[f64]) -> f64 {
+        let mean = actual.iter().sum::<f64>() / actual.len() as f64;
+        let total_sum_squares: f64 = actual.iter().map(|&x| (x - mean).powi(2)).sum();
+        let residual_sum_squares: f64 = predicted.iter()
+            .zip(actual.iter())
+            .map(|(&p, &a)| (a - p).powi(2))
+            .sum();
+
+        1.0 - (residual_sum_squares / total_sum_squares)
     }
 }
 

@@ -1,0 +1,184 @@
+# Monitoring System Documentation
+
+## Overview
+The monitoring system provides comprehensive monitoring capabilities for the trading bot, including system health, performance metrics, trading statistics, and alert management.
+
+## Components
+
+### 1. Alert Thresholds
+The `ThresholdManager` handles various types of thresholds:
+- System thresholds (CPU, memory, disk usage)
+- Performance thresholds (API, database, ML)
+- Trading thresholds (win rate, drawdown, position size)
+
+### 2. Alert Management
+The `AlertManager` provides:
+- Alert persistence
+- Alert history tracking
+- Alert statistics
+- Alert filtering and categorization
+
+### 3. Dashboard
+The `Dashboard` provides:
+- Real-time metrics
+- Historical data tracking
+- Alert visualization
+- Metric aggregation
+
+## Configuration
+
+### Threshold Configuration
+```rust
+let config = ThresholdConfig {
+    system_thresholds: SystemThresholds {
+        cpu_usage: 90.0,
+        memory_usage: 90.0,
+        disk_usage: 90.0,
+        error_rate: 10.0,
+        api_timeout: Duration::from_secs(5),
+        db_timeout: Duration::from_secs(5),
+    },
+    performance_thresholds: PerformanceThresholds {
+        api_error_rate: 5.0,
+        db_error_rate: 5.0,
+        api_response_time: Duration::from_secs(1),
+        db_query_time: Duration::from_secs(1),
+        ml_inference_time: Duration::from_secs(1),
+    },
+    trade_thresholds: TradeThresholds {
+        win_rate: 50.0,
+        max_drawdown: 20.0,
+        max_position_size: 1000.0,
+        min_profit_per_trade: 10.0,
+        max_loss_per_trade: 100.0,
+        daily_loss_limit: 1000.0,
+    },
+    notification_settings: NotificationSettings {
+        alert_cooldown: Duration::from_secs(300),
+        max_alerts_per_hour: 12,
+        alert_priority: HashMap::new(),
+    },
+};
+```
+
+## Usage
+
+### Initializing the Dashboard
+```rust
+let dashboard = Dashboard::new(
+    config,
+    Duration::from_secs(1),  // Update interval
+    Duration::from_secs(3600) // History retention
+);
+```
+
+### Updating Metrics
+```rust
+dashboard.update_metrics(&health_metrics, &perf_metrics).await;
+```
+
+### Getting Current Metrics
+```rust
+let metrics = dashboard.get_metrics().await;
+```
+
+### Resolving Alerts
+```rust
+dashboard.resolve_alert("alert_id").await;
+```
+
+### Getting Historical Metrics
+```rust
+let historical = dashboard.get_historical_metrics(
+    Some(start_time),
+    Some(end_time)
+).await;
+```
+
+## Alert Types
+
+### System Alerts
+- High CPU usage
+- High memory usage
+- High disk usage
+- High error rate
+- API connection issues
+- Database connection issues
+
+### Performance Alerts
+- High API error rate
+- High database error rate
+- Slow API response time
+- Slow database query time
+- Slow ML inference time
+
+### Trading Alerts
+- Low win rate
+- High drawdown
+- Daily loss limit exceeded
+- Position size exceeded
+
+## Alert Management
+
+### Adding Alerts
+```rust
+let alert = PersistedAlert {
+    id: "unique_id".to_string(),
+    message: "Alert message".to_string(),
+    priority: "high".to_string(),
+    category: "system".to_string(),
+    timestamp: Utc::now(),
+    resolved: false,
+    resolved_at: None,
+    metadata: HashMap::new(),
+};
+alert_manager.add_alert(alert).await?;
+```
+
+### Getting Alert Statistics
+```rust
+let stats = alert_manager.get_stats().await;
+```
+
+### Filtering Alerts
+```rust
+let alerts = alert_manager.get_alerts(
+    Some(false),  // Unresolved only
+    Some("high".to_string()),  // High priority
+    Some("system".to_string()),  // System category
+    Some(start_time),
+    Some(end_time)
+).await;
+```
+
+## Best Practices
+1. Set appropriate threshold values
+2. Monitor alert statistics regularly
+3. Clean up resolved alerts periodically
+4. Use historical data for trend analysis
+5. Implement proper error handling
+6. Monitor system performance
+7. Keep alert configurations up to date
+8. Use appropriate alert priorities
+
+## Testing
+Run the test suite:
+```bash
+cargo test --package trading-bot --lib -- monitoring::tests --exact --show-output
+```
+
+## Troubleshooting
+1. Alerts not triggering
+   - Check threshold values
+   - Verify metric collection
+   - Check alert manager status
+
+2. High alert volume
+   - Adjust threshold values
+   - Review alert cooldown settings
+   - Check for system issues
+
+3. Missing historical data
+   - Verify retention period
+   - Check storage capacity
+   - Monitor update frequency 

@@ -1,0 +1,61 @@
+Trading Bot Setup Instructions
+============================
+
+This document provides instructions for setting up the trading bot on a Linux system.
+
+Prerequisites
+------------
+- Linux operating system
+- Systemd service manager
+- Sudo privileges
+- Rust toolchain (for building the bot)
+
+Installation Steps
+----------------
+1. Build the trading bot:
+   ```bash
+   cargo build --release
+   ```
+
+2. Run the setup script:
+   ```bash
+   sudo ./scripts/setup.sh
+   ```
+
+The setup script will:
+- Create a dedicated system user and group
+- Create necessary directories
+- Install the binary
+- Install configuration files
+- Set up the systemd service
+- Start the trading bot
+
+Directory Structure
+-----------------
+- Binary: /usr/local/bin/trading-bot
+- Configuration: /var/lib/trading-bot/config/
+- Data: /var/lib/trading-bot/data/
+- Backups: /var/lib/trading-bot/backups/
+
+Service Management
+----------------
+- Start service: `sudo systemctl start trading-bot`
+- Stop service: `sudo systemctl stop trading-bot`
+- Restart service: `sudo systemctl restart trading-bot`
+- Check status: `sudo systemctl status trading-bot`
+- View logs: `sudo journalctl -u trading-bot`
+
+Troubleshooting
+--------------
+If the service fails to start:
+1. Check the logs: `sudo journalctl -u trading-bot`
+2. Verify file permissions
+3. Check configuration file syntax
+4. Ensure all dependencies are installed
+
+Security Notes
+-------------
+- The trading bot runs as a dedicated system user
+- Configuration files are readable only by the bot user
+- Data directories are owned by the bot user
+- Service runs with limited system privileges 

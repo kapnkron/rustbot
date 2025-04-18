@@ -3,7 +3,7 @@ use std::path::Path;
 use std::fs;
 use anyhow::Result;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub api: ApiConfig,
     pub trading: TradingConfig,
@@ -14,14 +14,14 @@ pub struct Config {
     pub ml: MLConfig,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiConfig {
     pub coingecko_api_key: String,
     pub coinmarketcap_api_key: String,
     pub cryptodatadownload_api_key: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TradingConfig {
     pub risk_level: f64,
     pub max_position_size: f64,
@@ -30,40 +30,40 @@ pub struct TradingConfig {
     pub trading_pairs: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MonitoringConfig {
     pub enable_prometheus: bool,
     pub prometheus_port: u16,
     pub alert_thresholds: AlertThresholds,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AlertThresholds {
     pub price_change_threshold: f64,
     pub volume_threshold: f64,
     pub error_rate_threshold: f64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TelegramConfig {
     pub bot_token: String,
     pub chat_id: String,
     pub enable_notifications: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
     pub max_connections: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SecurityConfig {
     pub enable_2fa: bool,
     pub api_key_rotation_days: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MLConfig {
     pub input_size: i64,
     pub hidden_size: i64,
@@ -78,6 +78,7 @@ pub struct MLConfig {
     pub validation_split: f64,
     pub early_stopping_patience: usize,
     pub save_best_model: bool,
+    pub evaluation_window_size: usize,
 }
 
 impl Config {

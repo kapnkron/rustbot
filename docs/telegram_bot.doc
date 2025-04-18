@@ -1,0 +1,106 @@
+# Telegram Trading Bot Documentation
+
+## Overview
+The Telegram Trading Bot provides a convenient interface for monitoring and managing cryptocurrency trading operations through Telegram. It offers real-time market data, trading signals, and system alerts directly in your Telegram chat.
+
+## Features
+
+### 1. Command System
+The bot supports the following commands:
+- `/start` - Start the bot and get welcome message
+- `/status` - Get current system status
+- `/positions` - View current trading positions
+- `/market <symbol>` - Get market data for a specific symbol
+- `/trading <true/false>` - Enable/disable trading
+- `/risk <level>` - Set risk level (0.0 to 1.0)
+- `/help` - Get list of available commands
+
+### 2. Real-time Notifications
+- Market data updates
+- Trading signals
+- System alerts
+- Position updates
+- Risk level warnings
+
+### 3. Security Features
+- Chat ID verification
+- Command rate limiting
+- Input validation
+- Secure API key storage
+
+## Usage Instructions
+
+### Starting the Bot
+```rust
+let bot = TelegramBot::new(
+    "YOUR_BOT_TOKEN".to_string(),
+    "YOUR_CHAT_ID".to_string()
+);
+bot.start().await?;
+```
+
+### Sending Notifications
+```rust
+// Send market data
+bot.send_market_data(&market_data).await?;
+
+// Send trading signal
+bot.send_trading_signal(&signal).await?;
+
+// Send alert
+bot.send_alert("System alert message").await?;
+```
+
+### Checking Trading Status
+```rust
+let is_trading = bot.is_trading_enabled().await;
+```
+
+## Configuration
+
+### Environment Variables
+- `TELEGRAM_BOT_TOKEN` - Your Telegram bot token
+- `TELEGRAM_CHAT_ID` - Your chat ID for notifications
+
+### Security Settings
+- Rate limiting for commands
+- Chat ID whitelist
+- Command permissions
+
+## Error Handling
+The bot provides error messages in the following format:
+```
+⚠️ Error: [error message]
+```
+
+## Best Practices
+1. Keep your bot token secure
+2. Use a dedicated chat for trading notifications
+3. Set appropriate risk levels
+4. Monitor trading status regularly
+5. Use alerts for important events
+6. Keep the bot updated
+7. Monitor system logs
+8. Use proper error handling
+
+## Testing
+Run the test suite:
+```bash
+cargo test --package trading-bot --lib -- telegram::tests --exact --show-output
+```
+
+## Troubleshooting
+1. Bot not responding
+   - Check bot token
+   - Verify chat ID
+   - Check internet connection
+
+2. Commands not working
+   - Verify command format
+   - Check permissions
+   - Look for error messages
+
+3. Missing notifications
+   - Check trading status
+   - Verify alert settings
+   - Monitor system logs 

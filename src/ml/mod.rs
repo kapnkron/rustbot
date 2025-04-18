@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
+use tch::nn::Module;
 
 mod preprocessing;
 pub use preprocessing::DataPreprocessor;
@@ -40,37 +41,26 @@ pub struct TradingModel {
 
 impl TradingModel {
     pub fn new(config: MLConfig) -> Result<Self> {
-        let device = Device::cuda_if_available();
-        let mut var_store = tch::nn::VarStore::new(device);
+        let var_store = tch::nn::VarStore::new(Device::Cpu);
+        let model = Self::create_model(&var_store.root(), &config)?;
         
-        let model = tch::nn::seq()
-            .add(tch::nn::linear(
-                &var_store.root(),
-                config.input_size,
-                config.hidden_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.relu())
-            .add(tch::nn::linear(
-                &var_store.root(),
-                config.hidden_size,
-                config.output_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.softmax(1, Kind::Float));
-
-        let evaluator = Arc::new(Mutex::new(ModelEvaluator::new(config.evaluation_window_size)));
-        let version_manager = Arc::new(Mutex::new(ModelVersionManager::new(&config.model_path)?));
-
         Ok(Self {
             config,
             model,
-            device,
+            device: Device::Cpu,
             var_store,
             preprocessor: DataPreprocessor::new(config.window_size),
-            evaluator,
-            version_manager,
+            evaluator: Arc::new(Mutex::new(ModelEvaluator::new(config.window_size))),
+            version_manager: Arc::new(Mutex::new(ModelVersionManager::new(&config.model_path)?)),
         })
+    }
+
+    fn create_model(vs: &tch::nn::Path, config: &MLConfig) -> Result<tch::nn::Sequential> {
+        let seq = tch::nn::seq()
+            .add(tch::nn::linear(vs, config.input_size, config.hidden_size, Default::default()))
+            .add_fn(|xs| xs.relu())
+            .add(tch::nn::linear(vs, config.hidden_size, config.output_size, Default::default()));
+        Ok(seq)
     }
 
     pub fn load(&mut self, path: &Path) -> Result<()> {
@@ -87,21 +77,34 @@ impl TradingModel {
         self.preprocessor.process_market_data(data)
     }
 
-    pub async fn predict(&mut self, data: &MarketData) -> Result<(f64, f64)> {
-        let input = self.process_market_data(data)?;
-        let start_time = Utc::now();
+    pub fn predict(&self, data: &MarketData) -> Result<Vec<f64>> {
+        use tch::nn::ModuleT;
+        let features = self.preprocessor.process_market_data(data)?;
+        let input = Tensor::f_from_slice(&features)?;
+        let output = self.model.forward_t(&input, false);
         
-        let output = self.model.forward(&Tensor::of_slice(&input));
-        let buy_prob = output.double_value(&[0]);
-        let sell_prob = output.double_value(&[1]);
+        let size = output.size1()?;
+        let mut result = Vec::with_capacity(size as usize);
+        for i in 0..size {
+            result.push(output.double_value(&[i]));
+        }
+        Ok(result)
+    }
+
+    pub async fn train(&mut self, data: &[MarketData]) -> Result<()> {
+        use tch::nn::{ModuleT, OptimizerConfig};
+        let (features, labels) = self.prepare_training_data(data)?;
         
-        let latency = (Utc::now() - start_time).num_milliseconds() as f64 / 1000.0;
+        let input = Tensor::f_from_slice(&features)?;
+        let target = Tensor::f_from_slice(&labels)?;
         
-        // Record prediction for evaluation
-        let mut evaluator = self.evaluator.lock().await;
-        evaluator.record_prediction(data.timestamp, buy_prob, sell_prob);
+        let output = self.model.forward_t(&input, true);
+        let loss = output.mse_loss(&target, tch::Reduction::Mean);
         
-        Ok((buy_prob, sell_prob))
+        let mut optimizer = tch::nn::Adam::default().build(&self.var_store, self.config.learning_rate)?;
+        optimizer.backward_step(&loss);
+        
+        Ok(())
     }
 
     pub fn train_batch(&mut self, features: &[Vec<f64>], labels: &[Vec<f64>]) -> Result<f64> {
@@ -109,11 +112,11 @@ impl TradingModel {
         let feature_size = features[0].len() as i64;
         let label_size = labels[0].len() as i64;
 
-        let input = Tensor::of_slice(&features.concat())
+        let input = Tensor::f_from_slice(&features.concat())?
             .reshape(&[batch_size, feature_size])
             .to(self.device);
         
-        let target = Tensor::of_slice(&labels.concat())
+        let target = Tensor::f_from_slice(&labels.concat())?
             .reshape(&[batch_size, label_size])
             .to(self.device);
         
@@ -164,15 +167,15 @@ impl TradingModel {
 
         let mut hyperparameters = HashMap::new();
         hyperparameters.insert("learning_rate".to_string(), self.config.learning_rate.to_string());
-        hyperparameters.insert("batch_size".to_string(), self.config.batch_size.to_string());
+        hyperparameters.insert("batch_size".to_string(), self.config.training_batch_size.to_string());
         hyperparameters.insert("hidden_size".to_string(), self.config.hidden_size.to_string());
 
         let mut version_manager = self.version_manager.lock().await;
         version_manager.create_version(
             metrics_map,
-            &self.config.model_path,
-            self.config.training_data_size,
-            self.config.features_used.clone(),
+            Path::new(&self.config.model_path),
+            self.config.training_batch_size,
+            self.config.features.clone(),
             hyperparameters,
         )?;
 
@@ -188,6 +191,25 @@ impl TradingModel {
     pub async fn compare_versions(&self, version1: &str, version2: &str) -> Result<HashMap<String, f64>> {
         let version_manager = self.version_manager.lock().await;
         version_manager.compare_versions(version1, version2)
+    }
+
+    fn prepare_training_data(&mut self, data: &[MarketData]) -> Result<(Vec<f64>, Vec<f64>)> {
+        let mut features = Vec::new();
+        let mut labels = Vec::new();
+        
+        for window in data.windows(self.config.window_size + 1) {
+            let mut window_features = Vec::new();
+            for i in 0..self.config.window_size {
+                let feature_vec = self.preprocessor.process_market_data(&window[i])?;
+                window_features.extend(feature_vec);
+            }
+            features.extend(window_features);
+            
+            // Use the next price as the label
+            labels.push(window[self.config.window_size].price);
+        }
+        
+        Ok((features, labels))
     }
 }
 
@@ -236,10 +258,11 @@ mod tests {
         let mut model = TradingModel::new(config).unwrap();
         let data = create_test_market_data(100.0, 1000.0, 1_000_000_000.0);
         
-        let (buy_prob, sell_prob) = model.predict(&data).unwrap();
-        assert!(buy_prob >= 0.0 && buy_prob <= 1.0);
-        assert!(sell_prob >= 0.0 && sell_prob <= 1.0);
-        assert!((buy_prob + sell_prob - 1.0).abs() < 1e-6);
+        let prediction = model.predict(&data).unwrap();
+        assert!(prediction.len() == 2);
+        assert!(prediction[0] >= 0.0 && prediction[0] <= 1.0);
+        assert!(prediction[1] >= 0.0 && prediction[1] <= 1.0);
+        assert!((prediction[0] + prediction[1] - 1.0).abs() < 1e-6);
     }
 
     #[tokio::test]
@@ -269,9 +292,10 @@ mod tests {
             volume_change_24h: 0.1,
         };
 
-        let (buy_prob, sell_prob) = model.predict(&market_data).await.unwrap();
-        assert!(buy_prob >= 0.0 && buy_prob <= 1.0);
-        assert!(sell_prob >= 0.0 && sell_prob <= 1.0);
+        let prediction = model.predict(&market_data).await.unwrap();
+        assert!(prediction.len() == 2);
+        assert!(prediction[0] >= 0.0 && prediction[0] <= 1.0);
+        assert!(prediction[1] >= 0.0 && prediction[1] <= 1.0);
         
         // Record actual move
         model.record_actual_move(market_data.timestamp, 0.02).await.unwrap();
@@ -314,7 +338,7 @@ mod tests {
             volume_change_24h: 0.1,
         };
 
-        let (buy_prob, sell_prob) = model.predict(&market_data).await?;
+        let prediction = model.predict(&market_data).await?;
         model.record_actual_move(market_data.timestamp, 0.02).await?;
         
         // Save version

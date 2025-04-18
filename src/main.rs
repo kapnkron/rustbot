@@ -12,11 +12,9 @@ mod models;
 mod services;
 mod utils;
 mod ml;
-mod bonk;
 mod monitoring;
 mod telegram;
 mod security;
-mod web;
 mod trading;
 mod wallet;
 
@@ -55,11 +53,9 @@ async fn main() -> Result<()> {
     let config = Config::load(&args.config)?;
     info!("Configuration loaded successfully");
 
-    // Initialize Telegram bot
-    let telegram_bot = TelegramBot::new(
-        config.telegram.bot_token.clone(),
-        config.telegram.chat_id.clone(),
-    );
+    // Create channels for market data and trading signals
+    let (market_data_tx, mut market_data_rx) = mpsc::channel(100);
+    let (signal_tx, mut signal_rx) = mpsc::channel(100);
 
     // Initialize market data collector
     let market_data_collector = MarketDataCollector::new(
@@ -69,11 +65,14 @@ async fn main() -> Result<()> {
     );
 
     // Initialize trading bot
-    let mut trading_bot = TradingBot::new(config.clone());
+    let trading_bot = TradingBot::new(market_data_collector);
 
-    // Create channels for market data and trading signals
-    let (market_data_tx, mut market_data_rx) = mpsc::channel(100);
-    let (signal_tx, mut signal_rx) = mpsc::channel(100);
+    // Initialize Telegram bot
+    let telegram_bot = TelegramBot::new(
+        config.telegram.bot_token.clone(),
+        config.telegram.chat_id.clone(),
+        trading_bot.clone(),
+    );
 
     // Start Telegram bot
     let telegram_handle = tokio::spawn(async move {
@@ -116,7 +115,7 @@ async fn main() -> Result<()> {
     // Start market data processing
     let market_data_processor = tokio::spawn(async move {
         while let Some(data) = market_data_rx.recv().await {
-            match trading_bot.process_market_data(data).await {
+            match trading_bot.process_market_data(data.into()).await {
                 Ok(Some(signal)) => {
                     if let Err(e) = signal_tx.send(signal).await {
                         error!("Failed to send trading signal: {}", e);

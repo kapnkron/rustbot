@@ -1,5 +1,5 @@
 use crate::utils::error::Result;
-use crate::trading::{MarketData, TradingSignal};
+use crate::trading::{MarketData, TradingSignal, TradingBot};
 use teloxide::prelude::*;
 use teloxide::types::{Message, ParseMode};
 use teloxide::utils::command::BotCommands;
@@ -8,21 +8,19 @@ use tokio::sync::Mutex;
 use log::{info, error};
 
 #[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase")]
+#[command(rename_rule = "lowercase", description = "These commands are supported:")]
 pub enum Command {
     #[command(description = "Start the bot")]
     Start,
-    #[command(description = "Get current status")]
-    Status,
+    #[command(description = "Get current market data")]
+    MarketData,
     #[command(description = "Get current positions")]
     Positions,
-    #[command(description = "Get market data for a symbol")]
-    Market(String),
-    #[command(description = "Enable/disable trading")]
-    Trading(bool),
-    #[command(description = "Set risk level")]
-    Risk(f64),
-    #[command(description = "Get help")]
+    #[command(description = "Get trading history")]
+    History,
+    #[command(description = "Get bot status")]
+    Status,
+    #[command(description = "Display this help message")]
     Help,
 }
 
@@ -30,14 +28,16 @@ pub struct TelegramBot {
     bot: Bot,
     chat_id: ChatId,
     trading_enabled: Arc<Mutex<bool>>,
+    trading_bot: Arc<Mutex<TradingBot>>,
 }
 
 impl TelegramBot {
-    pub fn new(bot_token: String, chat_id: String) -> Self {
+    pub fn new(bot_token: String, chat_id: String, trading_bot: TradingBot) -> Self {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
             trading_enabled: Arc::new(Mutex::new(false)),
+            trading_bot: Arc::new(Mutex::new(trading_bot)),
         }
     }
 
@@ -119,6 +119,8 @@ async fn command_handler(
     bot: Bot,
     msg: Message,
     cmd: Command,
+    trading_bot: Arc<Mutex<TradingBot>>,
+    trading_enabled: Arc<Mutex<bool>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match cmd {
         Command::Start => {
@@ -129,30 +131,49 @@ async fn command_handler(
             .await?;
         }
         Command::Status => {
-            // TODO: Implement status command
-            bot.send_message(msg.chat.id, "Status: Running").await?;
+            let status = if *trading_enabled.lock().await {
+                "Trading is enabled"
+            } else {
+                "Trading is disabled"
+            };
+            bot.send_message(msg.chat.id, status).await?;
         }
         Command::Positions => {
-            // TODO: Implement positions command
-            bot.send_message(msg.chat.id, "No open positions").await?;
+            let positions = trading_bot.lock().await.get_positions().await?;
+            if positions.is_empty() {
+                bot.send_message(msg.chat.id, "No open positions").await?;
+            } else {
+                let message = positions
+                    .iter()
+                    .map(|p| format!("{}: {} @ ${:.2}", p.symbol, p.amount, p.entry_price))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                bot.send_message(msg.chat.id, format!("Open positions:\n{}", message))
+                    .await?;
+            }
         }
-        Command::Market(symbol) => {
-            // TODO: Implement market data command
-            bot.send_message(msg.chat.id, format!("Fetching data for {}", symbol))
-                .await?;
+        Command::MarketData => {
+            if let Ok(data) = trading_bot.lock().await.get_market_data(&String::new()).await {
+                let message = format!(
+                    "📊 Market Data for {}\n\
+                    Price: ${:.2}\n\
+                    Volume: ${:.2}\n\
+                    Market Cap: ${:.2}\n\
+                    24h Change: {:.2}%",
+                    data.symbol,
+                    data.price,
+                    data.volume,
+                    data.market_cap,
+                    data.price_change_24h
+                );
+                bot.send_message(msg.chat.id, message).await?;
+            } else {
+                bot.send_message(msg.chat.id, "Failed to fetch market data").await?;
+            }
         }
-        Command::Trading(enabled) => {
-            // TODO: Implement trading toggle
-            bot.send_message(
-                msg.chat.id,
-                format!("Trading {}", if enabled { "enabled" } else { "disabled" }),
-            )
-            .await?;
-        }
-        Command::Risk(level) => {
-            // TODO: Implement risk level setting
-            bot.send_message(msg.chat.id, format!("Risk level set to {}", level))
-                .await?;
+        Command::History => {
+            // Implement history retrieval
+            bot.send_message(msg.chat.id, "History retrieval not implemented").await?;
         }
         Command::Help => {
             bot.send_message(

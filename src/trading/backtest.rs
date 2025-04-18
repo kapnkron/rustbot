@@ -1,8 +1,9 @@
 use crate::utils::error::Result;
-use crate::trading::{TradingBot, MarketData, TradingSignal, Position};
+use crate::trading::{TradingBot, MarketData, TradingSignal, Position, SignalType};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use log::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BacktestResult {
@@ -64,58 +65,64 @@ impl Backtester {
                 match signal.signal_type {
                     SignalType::Buy => {
                         if current_position.is_none() {
-                            self.bot.execute_signal(signal).await?;
-                            current_position = self.bot.position.clone();
+                            // Open long position
+                            let position = Position {
+                                symbol: signal.symbol.clone(),
+                                amount: self.current_balance / signal.price,
+                                entry_price: signal.price,
+                                current_price: signal.price,
+                                unrealized_pnl: 0.0,
+                                size: self.current_balance,
+                                entry_time: data.timestamp,
+                            };
+                            current_position = Some(position);
+                            info!("Opened long position for {} at ${}", signal.symbol, signal.price);
                         }
-                    },
-                    SignalType::Sell | SignalType::Close => {
-                        if let Some(position) = &current_position {
-                            self.bot.execute_signal(signal).await?;
-                            let pnl = (data.price - position.entry_price) * position.size;
+                    }
+                    SignalType::Sell => {
+                        if let Some(position) = current_position.take() {
+                            // Close position and calculate PnL
+                            let pnl = position.amount * (signal.price - position.entry_price);
                             self.current_balance += pnl;
-
-                            // Record trade
-                            self.trades.push(Trade {
+                            
+                            let trade = Trade {
                                 entry_time: position.entry_time,
                                 exit_time: data.timestamp,
-                                symbol: position.symbol.clone(),
+                                symbol: position.symbol,
                                 entry_price: position.entry_price,
-                                exit_price: data.price,
+                                exit_price: signal.price,
                                 size: position.size,
                                 pnl,
-                                pnl_percentage: pnl / (position.entry_price * position.size),
-                            });
-
-                            current_position = None;
+                                pnl_percentage: pnl / position.size * 100.0,
+                            };
+                            self.trades.push(trade);
+                            
+                            info!("Closed position with PnL: ${:.2}", pnl);
                         }
-                    },
-                    SignalType::Hold => (),
+                    }
+                    SignalType::Hold => {}
                 }
             }
 
-            // Calculate daily returns
-            if !self.equity_curve.is_empty() {
-                let current_return = (self.current_balance - previous_balance) / previous_balance;
-                daily_returns.push(current_return);
-                previous_balance = self.current_balance;
+            // Update position if we have one
+            if let Some(ref mut position) = current_position {
+                position.current_price = data.price;
+                position.unrealized_pnl = position.amount * (data.price - position.entry_price);
             }
 
-            // Update max drawdown
-            self.max_balance = self.max_balance.max(self.current_balance);
+            // Calculate daily returns
+            let daily_return = (self.current_balance - previous_balance) / previous_balance;
+            daily_returns.push(daily_return);
+            previous_balance = self.current_balance;
         }
 
-        // Calculate statistics
+        // Calculate backtest metrics
         let total_trades = self.trades.len();
         let winning_trades = self.trades.iter().filter(|t| t.pnl > 0.0).count();
         let losing_trades = total_trades - winning_trades;
-        let win_rate = if total_trades > 0 {
-            winning_trades as f64 / total_trades as f64
-        } else {
-            0.0
-        };
-
+        let win_rate = winning_trades as f64 / total_trades as f64;
         let total_pnl = self.current_balance - self.initial_balance;
-        let max_drawdown = (self.max_balance - self.current_balance) / self.max_balance;
+        let max_drawdown = self.calculate_max_drawdown();
         let sharpe_ratio = self.calculate_sharpe_ratio(&daily_returns);
 
         Ok(BacktestResult {
@@ -131,23 +138,35 @@ impl Backtester {
         })
     }
 
-    fn calculate_sharpe_ratio(&self, returns: &[f64]) -> f64 {
-        if returns.is_empty() {
-            return 0.0;
+    fn calculate_max_drawdown(&self) -> f64 {
+        let mut max_drawdown = 0.0;
+        let mut peak = self.initial_balance;
+
+        for &(_, balance) in &self.equity_curve {
+            if balance > peak {
+                peak = balance;
+            }
+            let drawdown = (peak - balance) / peak;
+            if drawdown > max_drawdown {
+                max_drawdown = drawdown;
+            }
         }
 
-        let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance = returns.iter()
-            .map(|&x| (x - mean).powi(2))
-            .sum::<f64>() / returns.len() as f64;
+        max_drawdown
+    }
+
+    fn calculate_sharpe_ratio(&self, daily_returns: &[f64]) -> f64 {
+        let mean_return = daily_returns.iter().sum::<f64>() / daily_returns.len() as f64;
+        let variance = daily_returns.iter()
+            .map(|&r| (r - mean_return).powi(2))
+            .sum::<f64>() / daily_returns.len() as f64;
         let std_dev = variance.sqrt();
 
         if std_dev == 0.0 {
-            return 0.0;
+            0.0
+        } else {
+            mean_return / std_dev * (252.0_f64).sqrt() // Annualized Sharpe Ratio
         }
-
-        // Assuming risk-free rate of 0 for simplicity
-        mean / std_dev * (252.0_f64).sqrt() // Annualized
     }
 }
 

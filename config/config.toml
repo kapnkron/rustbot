@@ -1,0 +1,20 @@
+[general]
+log_level = "info"
+data_dir = "/var/lib/trading-bot/data"
+backup_dir = "/var/lib/trading-bot/backups"
+
+[api]
+host = "127.0.0.1"
+port = 8080
+
+[database]
+path = "/var/lib/trading-bot/data/trading.db"
+
+[monitoring]
+alert_threshold = 0.1
+check_interval = 60
+
+[security]
+api_key_rotation_days = 30
+rate_limit_requests = 100
+rate_limit_window_seconds = 60 

@@ -1,4 +1,5 @@
 use crate::utils::error::Result;
+use crate::utils::error::Error;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -35,10 +36,9 @@ impl RiskManager {
         position_size.min(self.max_position_size)
     }
 
-    pub fn update_daily_pnl(&mut self, pnl: f64) -> Result<()> {
-        self.daily_pnl += pnl;
-        if self.daily_pnl < -self.max_daily_loss {
-            return Err(anyhow::anyhow!("Daily loss limit exceeded"));
+    pub async fn check_daily_loss_limit(&self, daily_pnl: f64) -> Result<()> {
+        if daily_pnl < -self.max_daily_loss {
+            return Err(Error::ValidationError("Daily loss limit exceeded".to_string()));
         }
         Ok(())
     }

@@ -1,20 +1,14 @@
-use crate::utils::error::Result;
-use crate::trading::{TradingBot, MarketData, TradingSignal, Position};
-use crate::ml::TradingModel;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use log::{info, warn, error};
 use prometheus::{Counter, Gauge, Histogram, Registry};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MonitoringConfig {
-    pub enable_prometheus: bool,
-    pub prometheus_port: u16,
-    pub log_level: String,
-    pub metrics_interval_seconds: u64,
-}
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use crate::config::{Config, MonitoringConfig, AlertThresholds};
+use crate::api::MarketDataCollector;
+use crate::trading::{TradingBot, Position};
+use crate::ml::TradingModel;
+use crate::utils::error::Result;
 
 pub struct Monitor {
     config: MonitoringConfig,
@@ -47,11 +41,9 @@ struct Metrics {
     position_exposure: Gauge,
 }
 
-impl Monitor {
-    pub fn new(config: MonitoringConfig, bot: TradingBot, model: Option<TradingModel>) -> Result<Self> {
-        let registry = Registry::new();
-        
-        let metrics = Metrics {
+impl Metrics {
+    pub fn new(registry: &Registry) -> Result<Self> {
+        let metrics = Self {
             total_trades: Counter::new("total_trades", "Total number of trades executed")?,
             winning_trades: Counter::new("winning_trades", "Number of winning trades")?,
             losing_trades: Counter::new("losing_trades", "Number of losing trades")?,
@@ -88,6 +80,15 @@ impl Monitor {
         registry.register(Box::new(metrics.daily_pnl.clone()))?;
         registry.register(Box::new(metrics.position_exposure.clone()))?;
 
+        Ok(metrics)
+    }
+}
+
+impl Monitor {
+    pub fn new(config: MonitoringConfig, bot: TradingBot, model: Option<TradingModel>) -> Result<Self> {
+        let registry = Registry::new();
+        let metrics = Metrics::new(&registry)?;
+        
         Ok(Self {
             config,
             registry,
@@ -162,26 +163,12 @@ impl Monitor {
         self.metrics.risk_per_trade.set(risk_per_trade);
         self.metrics.daily_pnl.set(daily_pnl);
         
-        if daily_pnl < -self.bot.lock().await.config.trading.max_daily_loss {
+        if daily_pnl < -0.1 { // Using a fixed threshold for now
             warn!(
                 "Daily loss limit exceeded: {:.2}%",
                 daily_pnl * 100.0
             );
         }
-        
-        Ok(())
-    }
-
-    pub async fn start_metrics_server(&self) -> Result<()> {
-        if !self.config.enable_prometheus {
-            return Ok(());
-        }
-
-        let addr = ([0, 0, 0, 0], self.config.prometheus_port).into();
-        let server = prometheus::Server::new(self.registry.clone(), addr);
-        
-        info!("Starting metrics server on port {}", self.config.prometheus_port);
-        server.start().await?;
         
         Ok(())
     }
@@ -191,36 +178,134 @@ impl Monitor {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::trading::TradingBot;
+    use crate::ml::TradingModel;
 
     #[tokio::test]
     async fn test_monitor_creation() {
         let config = Config {
-            monitoring: MonitoringConfig {
-                enable_prometheus: true,
-                prometheus_port: 9090,
-                log_level: "info".to_string(),
-                metrics_interval_seconds: 60,
+            api: crate::config::ApiConfig {
+                coingecko_api_key: "test".to_string(),
+                coinmarketcap_api_key: "test".to_string(),
+                cryptodatadownload_api_key: "test".to_string(),
             },
-            // ... other config fields ...
+            trading: crate::config::TradingConfig {
+                risk_level: 0.1,
+                max_position_size: 1000.0,
+                stop_loss_percentage: 0.05,
+                take_profit_percentage: 0.1,
+                trading_pairs: vec!["BTC/USD".to_string()],
+            },
+            monitoring: MonitoringConfig {
+                enable_prometheus: false,
+                prometheus_port: 9090,
+                alert_thresholds: crate::config::AlertThresholds {
+                    price_change_threshold: 0.1,
+                    volume_threshold: 1000.0,
+                    error_rate_threshold: 0.05,
+                },
+            },
+            telegram: crate::config::TelegramConfig {
+                bot_token: "test".to_string(),
+                chat_id: "test".to_string(),
+                enable_notifications: true,
+            },
+            database: crate::config::DatabaseConfig {
+                url: "test".to_string(),
+                max_connections: 10,
+            },
+            security: crate::config::SecurityConfig {
+                enable_2fa: false,
+                api_key_rotation_days: 30,
+            },
+            ml: crate::config::MLConfig {
+                input_size: 10,
+                hidden_size: 20,
+                output_size: 1,
+                learning_rate: 0.001,
+                model_path: "test".to_string(),
+                confidence_threshold: 0.8,
+                training_batch_size: 32,
+                training_epochs: 10,
+                window_size: 10,
+                min_data_points: 100,
+                validation_split: 0.2,
+                early_stopping_patience: 3,
+                save_best_model: true,
+                evaluation_window_size: 10,
+            },
         };
 
-        let bot = TradingBot::new(config.clone(), 10000.0);
+        let market_data_collector = MarketDataCollector::new(
+            "test".to_string(),
+            "test".to_string(),
+            "test".to_string(),
+        );
+        let bot = TradingBot::new(market_data_collector);
         assert!(Monitor::new(config.monitoring, bot, None).is_ok());
     }
 
     #[tokio::test]
     async fn test_metrics_recording() {
         let config = Config {
-            monitoring: MonitoringConfig {
-                enable_prometheus: true,
-                prometheus_port: 9090,
-                log_level: "info".to_string(),
-                metrics_interval_seconds: 60,
+            api: crate::config::ApiConfig {
+                coingecko_api_key: "test".to_string(),
+                coinmarketcap_api_key: "test".to_string(),
+                cryptodatadownload_api_key: "test".to_string(),
             },
-            // ... other config fields ...
+            trading: crate::config::TradingConfig {
+                risk_level: 0.1,
+                max_position_size: 1000.0,
+                stop_loss_percentage: 0.05,
+                take_profit_percentage: 0.1,
+                trading_pairs: vec!["BTC/USD".to_string()],
+            },
+            monitoring: MonitoringConfig {
+                enable_prometheus: false,
+                prometheus_port: 9090,
+                alert_thresholds: crate::config::AlertThresholds {
+                    price_change_threshold: 0.1,
+                    volume_threshold: 1000.0,
+                    error_rate_threshold: 0.05,
+                },
+            },
+            telegram: crate::config::TelegramConfig {
+                bot_token: "test".to_string(),
+                chat_id: "test".to_string(),
+                enable_notifications: true,
+            },
+            database: crate::config::DatabaseConfig {
+                url: "test".to_string(),
+                max_connections: 10,
+            },
+            security: crate::config::SecurityConfig {
+                enable_2fa: false,
+                api_key_rotation_days: 30,
+            },
+            ml: crate::config::MLConfig {
+                input_size: 10,
+                hidden_size: 20,
+                output_size: 1,
+                learning_rate: 0.001,
+                model_path: "test".to_string(),
+                confidence_threshold: 0.8,
+                training_batch_size: 32,
+                training_epochs: 10,
+                window_size: 10,
+                min_data_points: 100,
+                validation_split: 0.2,
+                early_stopping_patience: 3,
+                save_best_model: true,
+                evaluation_window_size: 10,
+            },
         };
 
-        let bot = TradingBot::new(config.clone(), 10000.0);
+        let market_data_collector = MarketDataCollector::new(
+            "test".to_string(),
+            "test".to_string(),
+            "test".to_string(),
+        );
+        let bot = TradingBot::new(market_data_collector);
         let monitor = Monitor::new(config.monitoring, bot, None).unwrap();
 
         // Test trade recording

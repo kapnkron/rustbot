@@ -1,0 +1,215 @@
+# Deployment Guide
+
+## Prerequisites
+- Rust 1.70 or higher
+- SQLite
+- Python 3.8+ (for ML)
+- Systemd (for Linux)
+- Nginx (for web interface)
+
+## Deployment Steps
+
+### 1. System Setup
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y build-essential sqlite3 python3.8 python3-pip nginx
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+```
+
+### 2. Application Setup
+```bash
+# Clone repository
+git clone <repository-url>
+cd trading-bot
+
+# Build release version
+cargo build --release
+
+# Create necessary directories
+mkdir -p /var/lib/trading-bot/{data,logs,config}
+```
+
+### 3. Configuration
+```bash
+# Copy configuration files
+cp .env.example .env
+cp config.example.toml config.toml
+
+# Set up environment variables
+export TRADING_BOT_CONFIG=/var/lib/trading-bot/config/config.toml
+export TRADING_BOT_DATA=/var/lib/trading-bot/data
+export TRADING_BOT_LOGS=/var/lib/trading-bot/logs
+```
+
+### 4. Systemd Service
+Create `/etc/systemd/system/trading-bot.service`:
+```ini
+[Unit]
+Description=Trading Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=trading-bot
+Group=trading-bot
+WorkingDirectory=/var/lib/trading-bot
+ExecStart=/usr/local/bin/trading-bot
+Restart=always
+Environment=TRADING_BOT_CONFIG=/var/lib/trading-bot/config/config.toml
+Environment=TRADING_BOT_DATA=/var/lib/trading-bot/data
+Environment=TRADING_BOT_LOGS=/var/lib/trading-bot/logs
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 5. Nginx Configuration
+Create `/etc/nginx/sites-available/trading-bot`:
+```nginx
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+
+    location / {
+        proxy_pass http://localhost:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### 6. SSL Certificate
+```bash
+# Install certbot
+sudo apt-get install certbot python3-certbot-nginx
+
+# Obtain certificate
+sudo certbot --nginx -d your-domain.com
+```
+
+### 7. Start Services
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Start trading bot
+sudo systemctl start trading-bot
+sudo systemctl enable trading-bot
+
+# Start nginx
+sudo systemctl start nginx
+sudo systemctl enable nginx
+```
+
+## Monitoring
+
+### 1. Logs
+```bash
+# View logs
+journalctl -u trading-bot -f
+
+# Check nginx logs
+tail -f /var/log/nginx/error.log
+tail -f /var/log/nginx/access.log
+```
+
+### 2. Status
+```bash
+# Check service status
+systemctl status trading-bot
+systemctl status nginx
+
+# Check web interface
+curl https://your-domain.com/status
+```
+
+## Backup
+
+### 1. Configuration Backup
+```bash
+# Backup configuration
+tar -czf trading-bot-config-$(date +%Y%m%d).tar.gz /var/lib/trading-bot/config
+
+# Backup data
+tar -czf trading-bot-data-$(date +%Y%m%d).tar.gz /var/lib/trading-bot/data
+```
+
+### 2. Database Backup
+```bash
+# Backup SQLite database
+sqlite3 /var/lib/trading-bot/data/trading.db ".backup 'trading-$(date +%Y%m%d).db'"
+```
+
+## Updates
+
+### 1. Application Update
+```bash
+# Stop service
+sudo systemctl stop trading-bot
+
+# Update code
+git pull
+cargo build --release
+
+# Start service
+sudo systemctl start trading-bot
+```
+
+### 2. Configuration Update
+```bash
+# Update configuration
+cp new-config.toml /var/lib/trading-bot/config/config.toml
+
+# Reload service
+sudo systemctl reload trading-bot
+```
+
+## Troubleshooting
+
+### 1. Common Issues
+- Service won't start
+- Web interface inaccessible
+- Database errors
+- SSL certificate issues
+
+### 2. Solutions
+- Check logs
+- Verify permissions
+- Test configuration
+- Check network connectivity
+
+### 3. Emergency Procedures
+- Stop trading
+- Backup data
+- Contact support
+- Rollback if needed
+
+## Security
+
+### 1. Firewall
+```bash
+# Allow necessary ports
+sudo ufw allow 443/tcp
+sudo ufw allow 22/tcp
+sudo ufw enable
+```
+
+### 2. Updates
+```bash
+# Regular updates
+sudo apt-get update
+sudo apt-get upgrade
+```
+
+### 3. Monitoring
+- Set up monitoring
+- Configure alerts
+- Review logs
+- Check security updates 

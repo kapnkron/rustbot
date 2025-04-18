@@ -19,7 +19,7 @@ mod input_validator;
 mod secure_storage;
 
 pub use api_key::ApiKeyManager;
-pub use yubikey::YubiKeyManager;
+pub use yubikey::YubikeyManager;
 pub use rate_limit::RateLimiter;
 pub use input_validator::InputValidator;
 pub use secure_storage::SecureStorage;
@@ -36,26 +36,38 @@ pub struct SecurityConfig {
     pub yubikey_secret_key: String,
 }
 
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            api_key_rotation_days: 30,
+            rate_limit_requests: 100,
+            rate_limit_window_seconds: 60,
+            max_input_length: 1000,
+            encryption_key_path: "test_key.pem".to_string(),
+            yubikey_enabled: false,
+            yubikey_client_id: "".to_string(),
+            yubikey_secret_key: "".to_string(),
+        }
+    }
+}
+
 pub struct SecurityManager {
     config: SecurityConfig,
     api_key_manager: Arc<Mutex<ApiKeyManager>>,
-    yubikey_manager: Option<Arc<Mutex<YubiKeyManager>>>,
+    yubikey_manager: Option<Arc<Mutex<YubikeyManager>>>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     input_validator: Arc<Mutex<InputValidator>>,
     secure_storage: Arc<Mutex<SecureStorage>>,
 }
 
 impl SecurityManager {
-    pub fn new(config: SecurityConfig) -> Result<Self> {
+    pub async fn new(config: SecurityConfig) -> Result<Self> {
         let api_key_manager = Arc::new(Mutex::new(ApiKeyManager::new(
-            config.api_key_rotation_days,
-        )?));
+            config.api_key_rotation_days.into(),
+        ).await?));
 
         let yubikey_manager = if config.yubikey_enabled {
-            Some(Arc::new(Mutex::new(YubiKeyManager::new(
-                &config.yubikey_client_id,
-                &config.yubikey_secret_key,
-            )?)))
+            Some(Arc::new(Mutex::new(YubikeyManager::new()?)))
         } else {
             None
         };
@@ -83,23 +95,37 @@ impl SecurityManager {
         })
     }
 
-    pub async fn validate_api_key(&self, key: &str) -> Result<bool> {
+    pub async fn validate_request(&self, key: &str, ip: &str) -> Result<bool> {
+        // Validate API key
+        if !self.validate_key(key).await? {
+            return Ok(false);
+        }
+
+        // Check rate limit
+        if !self.check_rate_limit(ip).await? {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+
+    pub async fn validate_key(&self, key: &str) -> Result<bool> {
         let manager = self.api_key_manager.lock().await;
-        manager.validate_key(key)
+        manager.validate_key(key).await
+    }
+
+    pub async fn check_rate_limit(&self, ip: &str) -> Result<bool> {
+        let limiter = self.rate_limiter.lock().await;
+        limiter.check_limit(ip).await
     }
 
     pub async fn validate_yubikey(&self, otp: &str) -> Result<bool> {
         if let Some(manager) = &self.yubikey_manager {
             let manager = manager.lock().await;
-            manager.validate_otp(otp)
+            manager.validate_otp(otp).await
         } else {
             Ok(true) // If YubiKey is not enabled, always return true
         }
-    }
-
-    pub async fn check_rate_limit(&self, ip: IpAddr) -> Result<bool> {
-        let limiter = self.rate_limiter.lock().await;
-        limiter.check_limit(ip)
     }
 
     pub async fn validate_input(&self, input: &str) -> Result<bool> {
@@ -117,9 +143,9 @@ impl SecurityManager {
         storage.decrypt(data)
     }
 
-    pub async fn rotate_api_keys(&self) -> Result<()> {
+    pub async fn rotate_keys(&self) -> Result<()> {
         let mut manager = self.api_key_manager.lock().await;
-        manager.rotate_keys()
+        manager.rotate_keys().await
     }
 
     pub async fn generate_new_api_key(&self, user_id: &str) -> Result<String> {
@@ -127,9 +153,9 @@ impl SecurityManager {
         manager.generate_key(user_id)
     }
 
-    pub async fn revoke_api_key(&self, key: &str) -> Result<()> {
+    pub async fn revoke_key(&self, key: &str) -> Result<()> {
         let mut manager = self.api_key_manager.lock().await;
-        manager.revoke_key(key)
+        manager.revoke_key(key).await
     }
 }
 
@@ -155,11 +181,11 @@ mod tests {
         
         // Test API key validation
         let api_key = manager.generate_new_api_key("test_user").await?;
-        assert!(manager.validate_api_key(&api_key).await?);
+        assert!(manager.validate_key(&api_key).await?);
         
         // Test rate limiting
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        assert!(manager.check_rate_limit(ip).await?);
+        assert!(manager.check_rate_limit(ip.to_string().as_str()).await?);
         
         // Test input validation
         assert!(manager.validate_input("valid input").await?);

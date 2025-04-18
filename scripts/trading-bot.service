@@ -1,0 +1,29 @@
+[Unit]
+Description=Trading Bot Service
+After=network.target
+
+[Service]
+Type=simple
+User=trading-bot
+Group=trading-bot
+WorkingDirectory=/var/lib/trading-bot
+ExecStart=/usr/local/bin/trading-bot
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+
+# Security
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=65536
+MemoryLimit=2G
+
+[Install]
+WantedBy=multi-user.target 
