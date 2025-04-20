@@ -15,6 +15,7 @@ pub struct TradeMetrics {
     pub total_loss: f64,
     pub average_trade_duration: Duration,
     pub win_rate: f64,
+    pub position_size: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +75,7 @@ impl PerformanceMonitor {
                     total_loss: 0.0,
                     average_trade_duration: Duration::from_secs(0),
                     win_rate: 0.0,
+                    position_size: 0.0,
                 },
                 api_metrics: ApiMetrics {
                     total_requests: 0,

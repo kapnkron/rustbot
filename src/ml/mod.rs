@@ -73,13 +73,22 @@ impl TradingModel {
         Ok(())
     }
 
-    pub fn process_market_data(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
-        self.preprocessor.process_market_data(data)
+    pub fn process_window(&self, window: &[TradingMarketData]) -> Result<Vec<f64>> {
+        let mut features = Vec::with_capacity(window.len());
+        for data in window {
+            let feature_vec = self.preprocessor.process_market_data(&data.clone().into())?;
+            features.extend(feature_vec);
+        }
+        Ok(features)
+    }
+
+    pub fn process_data(&self, data: &TradingMarketData) -> Result<Vec<f64>> {
+        self.preprocessor.process_market_data(&data.clone().into())
     }
 
     pub fn predict(&self, data: &TradingMarketData) -> Result<Vec<f64>> {
         use tch::nn::ModuleT;
-        let features = self.preprocessor.process_market_data(data)?;
+        let features = self.preprocessor.process_market_data(&data.into())?;
         let input = Tensor::f_from_slice(&features)?;
         let output = self.model.forward_t(&input, false);
         
@@ -151,24 +160,21 @@ impl TradingModel {
         Ok(())
     }
 
-    pub async fn get_metrics(&self) -> ModelMetrics {
-        let evaluator = self.evaluator.lock().await;
-        evaluator.get_metrics().clone()
+    pub fn get_metrics_map(&self) -> HashMap<String, f64> {
+        let metrics = self.evaluator.get_metrics();
+        let mut metrics_map = HashMap::new();
+        metrics_map.insert("mse".to_string(), metrics.mse);
+        metrics_map.insert("mae".to_string(), metrics.mae);
+        metrics_map.insert("rmse".to_string(), metrics.rmse);
+        metrics_map
     }
 
     pub async fn save_version(&mut self) -> Result<()> {
-        let metrics = self.get_metrics().await;
-        let mut metrics_map = HashMap::new();
-        metrics_map.insert("accuracy".to_string(), metrics.accuracy);
-        metrics_map.insert("precision".to_string(), metrics.precision);
-        metrics_map.insert("recall".to_string(), metrics.recall);
-        metrics_map.insert("f1_score".to_string(), metrics.f1_score);
-        metrics_map.insert("roc_auc".to_string(), metrics.roc_auc);
-
+        let metrics = self.get_metrics_map();
         let version = ModelVersion {
             version: "1.0.0".to_string(), // This should be incremented properly
             timestamp: Utc::now(),
-            metrics: metrics_map,
+            metrics: metrics,
             input_size: self.config.input_size,
             hidden_size: self.config.hidden_size,
             output_size: self.config.output_size,
@@ -198,7 +204,7 @@ impl TradingModel {
         for window in data.windows(self.config.window_size + 1) {
             let mut window_features = Vec::new();
             for i in 0..self.config.window_size {
-                let feature_vec = self.preprocessor.process_market_data(&window[i])?;
+                let feature_vec = self.preprocessor.process_market_data(&window[i].into())?;
                 window_features.extend(feature_vec);
             }
             features.extend(window_features);
@@ -326,12 +332,10 @@ mod tests {
         model.record_actual_move(market_data.timestamp, 0.02).await.unwrap();
         
         // Get metrics
-        let metrics = model.get_metrics().await;
-        assert!(metrics.accuracy >= 0.0 && metrics.accuracy <= 1.0);
-        assert!(metrics.precision >= 0.0 && metrics.precision <= 1.0);
-        assert!(metrics.recall >= 0.0 && metrics.recall <= 1.0);
-        assert!(metrics.f1_score >= 0.0 && metrics.f1_score <= 1.0);
-        assert!(metrics.roc_auc >= 0.0 && metrics.roc_auc <= 1.0);
+        let metrics = model.get_metrics_map();
+        assert!(metrics.contains_key("mse"));
+        assert!(metrics.contains_key("mae"));
+        assert!(metrics.contains_key("rmse"));
     }
 
     #[tokio::test]
@@ -388,7 +392,9 @@ mod tests {
         assert!(version_info.is_some());
         let version_info = version_info.unwrap();
         assert_eq!(version_info.version, "1.0.0");
-        assert!(version_info.metrics.contains_key("accuracy"));
+        assert!(version_info.metrics.contains_key("mse"));
+        assert!(version_info.metrics.contains_key("mae"));
+        assert!(version_info.metrics.contains_key("rmse"));
 
         Ok(())
     }

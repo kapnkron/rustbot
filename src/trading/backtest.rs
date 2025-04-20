@@ -15,6 +15,7 @@ pub struct BacktestResult {
     pub total_pnl: f64,
     pub max_drawdown: f64,
     pub sharpe_ratio: f64,
+    pub initial_balance: f64,
     pub trades: Vec<Trade>,
     pub equity_curve: Vec<(DateTime<Utc>, f64)>,
 }
@@ -62,7 +63,7 @@ impl Backtester {
             self.equity_curve.push((data.timestamp, self.current_balance));
 
             // Process market data and get signal
-            if let Some(signal) = self.bot.process_market_data(data.clone()).await? {
+            if let Some(signal) = self.bot.process_market_data(data.clone().into()).await? {
                 match signal.signal_type {
                     SignalType::Buy => {
                         if current_position.is_none() {
@@ -134,6 +135,7 @@ impl Backtester {
             total_pnl,
             max_drawdown,
             sharpe_ratio,
+            initial_balance: self.initial_balance,
             trades: self.trades.clone(),
             equity_curve: self.equity_curve.clone(),
         })
@@ -185,6 +187,17 @@ mod tests {
             market_cap: 1_000_000_000.0,
             price_change_24h: 0.0,
             volume_change_24h: 0.0,
+            volume_24h: 1000.0,
+            change_24h: 0.0,
+            quote: crate::api::types::Quote {
+                usd: crate::api::types::USDData {
+                    price,
+                    volume_24h: 1000.0,
+                    market_cap: 1_000_000_000.0,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            }
         }
     }
 

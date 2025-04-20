@@ -125,10 +125,13 @@ impl Dashboard {
         let perf_alerts = self.threshold_manager.check_performance_thresholds(perf_metrics);
         let trade_alerts = self.threshold_manager.check_trade_thresholds(perf_metrics);
 
+        // Store current alert count
+        let current_alert_count = metrics.alerts.len();
+
         // Add new alerts
-        for alert in system_alerts {
+        for (i, alert) in system_alerts.into_iter().enumerate() {
             metrics.alerts.push(Alert {
-                id: format!("system_{}", metrics.alerts.len()),
+                id: format!("system_{}", current_alert_count + i),
                 message: alert,
                 priority: "high".to_string(),
                 timestamp: Utc::now(),
@@ -136,9 +139,10 @@ impl Dashboard {
             });
         }
 
-        for alert in perf_alerts {
+        let current_alert_count = metrics.alerts.len();
+        for (i, alert) in perf_alerts.into_iter().enumerate() {
             metrics.alerts.push(Alert {
-                id: format!("perf_{}", metrics.alerts.len()),
+                id: format!("perf_{}", current_alert_count + i),
                 message: alert,
                 priority: "medium".to_string(),
                 timestamp: Utc::now(),
@@ -146,9 +150,10 @@ impl Dashboard {
             });
         }
 
-        for alert in trade_alerts {
+        let current_alert_count = metrics.alerts.len();
+        for (i, alert) in trade_alerts.into_iter().enumerate() {
             metrics.alerts.push(Alert {
-                id: format!("trade_{}", metrics.alerts.len()),
+                id: format!("trade_{}", current_alert_count + i),
                 message: alert,
                 priority: "critical".to_string(),
                 timestamp: Utc::now(),
@@ -186,6 +191,84 @@ impl Dashboard {
                 tokio::time::sleep(update_interval).await;
             }
         });
+    }
+
+    pub async fn get_system_health(&self) -> SystemHealth {
+        self.metrics.read().await.system_health.clone()
+    }
+
+    pub async fn get_performance_metrics(&self) -> Performance {
+        self.metrics.read().await.performance.clone()
+    }
+
+    pub async fn get_trading_metrics(&self) -> Trading {
+        self.metrics.read().await.trading.clone()
+    }
+
+    pub async fn get_active_alerts(&self) -> Vec<Alert> {
+        self.metrics.read().await.alerts.iter()
+            .filter(|alert| !alert.resolved)
+            .cloned()
+            .collect()
+    }
+
+    pub async fn get_alert_by_id(&self, alert_id: &str) -> Option<Alert> {
+        self.metrics.read().await.alerts.iter()
+            .find(|alert| alert.id == alert_id)
+            .cloned()
+    }
+
+    pub async fn get_metrics_since(&self, since: DateTime<Utc>) -> Vec<DashboardMetrics> {
+        // This would be implemented to return metrics history since the given timestamp
+        // For now, returning current metrics if they're newer than the given timestamp
+        let metrics = self.metrics.read().await;
+        if metrics.last_updated > since {
+            vec![metrics.clone()]
+        } else {
+            vec![]
+        }
+    }
+
+    pub async fn is_system_healthy(&self) -> bool {
+        let metrics = self.metrics.read().await;
+        metrics.system_health.cpu_usage < 90.0 &&
+        metrics.system_health.memory_usage < 90.0 &&
+        metrics.system_health.disk_usage < 90.0 &&
+        metrics.system_health.error_rate < 10.0 &&
+        metrics.system_health.api_status &&
+        metrics.system_health.db_status
+    }
+
+    pub async fn get_performance_summary(&self) -> String {
+        let metrics = self.metrics.read().await;
+        format!(
+            "API Error Rate: {:.2}%\n\
+             DB Error Rate: {:.2}%\n\
+             API Response Time: {:?}\n\
+             DB Query Time: {:?}\n\
+             ML Inference Time: {:?}",
+            metrics.performance.api_error_rate,
+            metrics.performance.db_error_rate,
+            metrics.performance.api_response_time,
+            metrics.performance.db_query_time,
+            metrics.performance.ml_inference_time
+        )
+    }
+
+    pub async fn get_trading_summary(&self) -> String {
+        let metrics = self.metrics.read().await;
+        format!(
+            "Win Rate: {:.2}%\n\
+             Drawdown: {:.2}%\n\
+             Total Profit: ${:.2}\n\
+             Total Loss: ${:.2}\n\
+             Position Size: ${:.2}",
+            metrics.trading.win_rate,
+            metrics.trading.drawdown,
+            metrics.trading.total_profit,
+            metrics.trading.total_loss,
+            metrics.trading.position_size
+        )
     }
 }
 

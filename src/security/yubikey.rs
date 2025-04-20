@@ -1,7 +1,7 @@
 use crate::error::{Result, Error};
 use log::{info, warn};
 use yubikey::{YubiKey, Context};
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 pub struct YubikeyManager {
     context: Mutex<Context>,
@@ -16,10 +16,8 @@ impl YubikeyManager {
     }
 
     pub async fn validate_otp(&self, otp: &str) -> Result<bool> {
-        let mut context = self.context.lock().map_err(|_| {
-            Error::SecurityError("Failed to lock YubiKey context".to_string())
-        })?;
-
+        let context = self.context.lock().await;
+        
         // Find the first available YubiKey
         let yubikey = YubiKey::open()?;
 
@@ -28,7 +26,8 @@ impl YubikeyManager {
             Ok(_) => {
                 // In a real implementation, you would validate the OTP against YubiCloud
                 // For now, we'll just check if the OTP is the correct length (44 characters)
-                if otp.len() == 44 {
+                // and contains only valid characters
+                if otp.len() == 44 && otp.chars().all(|c| c.is_ascii_alphanumeric()) {
                     info!("Valid YubiKey OTP format received");
                     Ok(true)
                 } else {

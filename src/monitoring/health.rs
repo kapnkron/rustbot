@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use log::{info, warn, error};
 use sysinfo::{System, SystemExt, ProcessExt};
 use chrono::{DateTime, Utc};
+use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthMetrics {
@@ -14,6 +15,7 @@ pub struct HealthMetrics {
     pub db_status: bool,
     pub memory_usage: f64,
     pub cpu_usage: f64,
+    pub disk_usage: f64,
     pub error_rate: f64,
     pub trading_status: bool,
     pub last_error: Option<String>,
@@ -34,6 +36,7 @@ pub struct HealthMonitor {
     error_count: RwLock<u32>,
     total_requests: RwLock<u32>,
     last_check: RwLock<Instant>,
+    error_rate: std::sync::atomic::AtomicU64,
 }
 
 impl HealthMonitor {
@@ -50,6 +53,7 @@ impl HealthMonitor {
                 db_status: true,
                 memory_usage: 0.0,
                 cpu_usage: 0.0,
+                disk_usage: 0.0,
                 error_rate: 0.0,
                 trading_status: true,
                 last_error: None,
@@ -57,6 +61,7 @@ impl HealthMonitor {
             error_count: RwLock::new(0),
             total_requests: RwLock::new(0),
             last_check: RwLock::new(Instant::now()),
+            error_rate: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -114,8 +119,21 @@ impl HealthMonitor {
         metrics.trading_status = status;
     }
 
-    pub async fn get_metrics(&self) -> HealthMetrics {
-        self.metrics.read().await.clone()
+    pub async fn get_metrics(&self) -> Result<HealthMetrics> {
+        let system = &self.system;
+        system.refresh_all();
+
+        Ok(HealthMetrics {
+            cpu_usage: system.global_cpu_info().cpu_usage(),
+            memory_usage: (system.used_memory() as f64 / system.total_memory() as f64) * 100.0,
+            disk_usage: self.get_disk_usage()?,
+            error_rate: self.error_rate.load(Ordering::Relaxed) as f64,
+            api_status: self.check_api_status().await?,
+            db_status: self.check_db_status().await?,
+            timestamp: Utc::now(),
+            trading_status: true,
+            last_error: None,
+        })
     }
 
     pub async fn is_healthy(&self) -> bool {

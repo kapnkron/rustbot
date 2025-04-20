@@ -1,12 +1,12 @@
 use crate::error::Result;
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use log::{info, warn};
+use std::net::IpAddr;
 
 pub struct RateLimiter {
-    requests: Mutex<HashMap<IpAddr, Vec<Instant>>>,
+    requests: Mutex<HashMap<String, Vec<Instant>>>,
     max_requests: u32,
     window: Duration,
 }
@@ -20,21 +20,24 @@ impl RateLimiter {
         }
     }
 
-    pub async fn check_limit(&self, ip: IpAddr) -> Result<bool> {
+    pub async fn check_limit(&self, ip: &str) -> Result<bool> {
         let mut requests = self.requests.lock().await;
         let now = Instant::now();
         
-        // Clean up old requests
-        if let Some(timestamps) = requests.get_mut(&ip) {
+        // Clean up old requests for all IPs
+        for timestamps in requests.values_mut() {
             timestamps.retain(|&t| now.duration_since(t) < self.window);
-            
+        }
+        
+        // Check limit for specific IP
+        if let Some(timestamps) = requests.get_mut(ip) {
             if timestamps.len() >= self.max_requests as usize {
+                warn!("Rate limit exceeded for IP: {}", ip);
                 return Ok(false);
             }
-            
             timestamps.push(now);
         } else {
-            requests.insert(ip, vec![now]);
+            requests.insert(ip.to_string(), vec![now]);
         }
         
         Ok(true)

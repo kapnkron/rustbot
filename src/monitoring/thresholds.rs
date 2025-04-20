@@ -72,29 +72,29 @@ impl ThresholdManager {
     pub fn validate_config(&self) -> Result<()> {
         // Validate system thresholds
         if self.config.system_thresholds.cpu_usage > 100.0 {
-            return Err(anyhow::anyhow!("CPU usage threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("CPU usage threshold cannot exceed 100%").into());
         }
         if self.config.system_thresholds.memory_usage > 100.0 {
-            return Err(anyhow::anyhow!("Memory usage threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("Memory usage threshold cannot exceed 100%").into());
         }
         if self.config.system_thresholds.disk_usage > 100.0 {
-            return Err(anyhow::anyhow!("Disk usage threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("Disk usage threshold cannot exceed 100%").into());
         }
 
         // Validate performance thresholds
         if self.config.performance_thresholds.api_error_rate > 100.0 {
-            return Err(anyhow::anyhow!("API error rate threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("API error rate threshold cannot exceed 100%").into());
         }
         if self.config.performance_thresholds.db_error_rate > 100.0 {
-            return Err(anyhow::anyhow!("Database error rate threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("Database error rate threshold cannot exceed 100%").into());
         }
 
         // Validate trade thresholds
         if self.config.trade_thresholds.win_rate > 100.0 {
-            return Err(anyhow::anyhow!("Win rate threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("Win rate threshold cannot exceed 100%").into());
         }
         if self.config.trade_thresholds.max_drawdown > 100.0 {
-            return Err(anyhow::anyhow!("Max drawdown threshold cannot exceed 100%"));
+            return Err(anyhow::anyhow!("Max drawdown threshold cannot exceed 100%").into());
         }
 
         Ok(())

@@ -150,6 +150,17 @@ mod tests {
             market_cap,
             price_change_24h: 0.0,
             volume_change_24h: 0.0,
+            volume_24h: volume,
+            change_24h: 0.0,
+            quote: crate::api::types::Quote {
+                usd: crate::api::types::USDData {
+                    price,
+                    volume_24h: volume,
+                    market_cap,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            }
         }
     }
 

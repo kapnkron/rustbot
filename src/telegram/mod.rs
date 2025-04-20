@@ -1,5 +1,6 @@
 use crate::api::MarketData;
-use crate::trading::{TradingSignal, TradingBot};
+use crate::trading::{TradingSignal, TradingBot, BacktestResult, Trade};
+use crate::monitoring::dashboard::Dashboard;
 use crate::error::Result;
 use teloxide::prelude::*;
 use teloxide::types::{Message, ParseMode};
@@ -34,15 +35,17 @@ pub struct TelegramBot {
     chat_id: ChatId,
     trading_enabled: Arc<Mutex<bool>>,
     trading_bot: Arc<Mutex<TradingBot>>,
+    dashboard: Arc<Mutex<Dashboard>>,
 }
 
 impl TelegramBot {
-    pub fn new(bot_token: String, chat_id: String, trading_bot: TradingBot) -> Self {
+    pub fn new(bot_token: String, chat_id: String, trading_bot: TradingBot, dashboard: Dashboard) -> Self {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
             trading_enabled: Arc::new(Mutex::new(false)),
             trading_bot: Arc::new(Mutex::new(trading_bot)),
+            dashboard: Arc::new(Mutex::new(dashboard)),
         }
     }
 
@@ -178,6 +181,162 @@ impl TelegramBot {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    pub async fn handle_command(&self, msg: Message, command: Command) -> Result<()> {
+        match command {
+            Command::Start => {
+                self.bot.send_message(msg.chat.id, "Welcome to the trading bot! Use /help to see available commands.").await?;
+            }
+            Command::Status => {
+                let dashboard = self.dashboard.lock().await;
+                let system_health = dashboard.get_system_health().await;
+                let performance = dashboard.get_performance_metrics().await;
+                let trading = dashboard.get_trading_metrics().await;
+                let is_healthy = dashboard.is_system_healthy().await;
+
+                let status_emoji = if is_healthy { "✅" } else { "⚠️" };
+                let message = format!(
+                    "🤖 *Bot Status* {}\n\n\
+                    *System Health*\n\
+                    CPU: {:.1}%\n\
+                    Memory: {:.1}%\n\
+                    Disk: {:.1}%\n\
+                    Error Rate: {:.1}%\n\n\
+                    *Performance*\n\
+                    API Error Rate: {:.1}%\n\
+                    DB Error Rate: {:.1}%\n\
+                    API Response Time: {:?}\n\n\
+                    *Trading*\n\
+                    Win Rate: {:.1}%\n\
+                    Drawdown: {:.1}%\n\
+                    Position Size: ${:.2}",
+                    status_emoji,
+                    system_health.cpu_usage,
+                    system_health.memory_usage,
+                    system_health.disk_usage,
+                    system_health.error_rate,
+                    performance.api_error_rate,
+                    performance.db_error_rate,
+                    performance.api_response_time,
+                    trading.win_rate,
+                    trading.drawdown,
+                    trading.position_size
+                );
+                self.bot.send_message(msg.chat.id, message)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
+            }
+            Command::MarketData => {
+                let trading_bot = self.trading_bot.lock().await;
+                if let Ok(data) = trading_bot.get_market_data(&String::new()).await {
+                    let message = format!(
+                        "📊 *Market Data*\n\n\
+                        Price: ${:.2}\n\
+                        Volume: {:.2}\n\
+                        24h Change: {:.2}%",
+                        data.price,
+                        data.volume,
+                        data.price_change_24h
+                    );
+                    self.bot.send_message(msg.chat.id, message)
+                        .parse_mode(ParseMode::MarkdownV2)
+                        .await?;
+                } else {
+                    self.bot.send_message(msg.chat.id, "Failed to fetch market data").await?;
+                }
+            }
+            Command::Positions => {
+                let trading_bot = self.trading_bot.lock().await;
+                if let Ok(positions) = trading_bot.get_positions().await {
+                    let message = if positions.is_empty() {
+                        "No active positions".to_string()
+                    } else {
+                        positions.iter()
+                            .map(|p| format!(
+                                "{}: {} @ ${:.2} (PnL: ${:.2})",
+                                p.symbol,
+                                p.amount,
+                                p.entry_price,
+                                p.unrealized_pnl
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    self.bot.send_message(msg.chat.id, message).await?;
+                } else {
+                    self.bot.send_message(msg.chat.id, "Failed to fetch positions").await?;
+                }
+            }
+            Command::History => {
+                let trading_bot = self.trading_bot.lock().await;
+                if let Ok(history) = trading_bot.get_trade_history().await {
+                    let message = if history.is_empty() {
+                        "No trade history available".to_string()
+                    } else {
+                        history.iter()
+                            .map(|t| format!(
+                                "{}: {} {} @ ${:.2} (PnL: ${:.2})",
+                                t.timestamp,
+                                if t.is_buy { "Bought" } else { "Sold" },
+                                t.amount,
+                                t.price,
+                                t.pnl
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    };
+                    self.bot.send_message(msg.chat.id, message).await?;
+                } else {
+                    self.bot.send_message(msg.chat.id, "Failed to fetch trade history").await?;
+                }
+            }
+            Command::Backtest => {
+                let trading_bot = self.trading_bot.lock().await;
+                if let Ok(results) = trading_bot.get_backtest_results().await {
+                    let message = format!(
+                        "📊 *Backtest Results*\n\n\
+                        💰 Initial Balance: ${:.2}\n\
+                        💵 Final Balance: ${:.2}\n\
+                        📈 Total PnL: ${:.2} ({:.2}%)\n\n\
+                        📊 *Performance Metrics*\n\
+                        ✅ Win Rate: {:.2}%\n\
+                        📊 Total Trades: {}\n\
+                        ✅ Winning Trades: {}\n\
+                        ❌ Losing Trades: {}\n\
+                        📉 Max Drawdown: {:.2}%\n\
+                        📊 Sharpe Ratio: {:.2}",
+                        results.initial_balance,
+                        results.initial_balance + results.total_pnl,
+                        results.total_pnl,
+                        (results.total_pnl / results.initial_balance) * 100.0,
+                        results.win_rate * 100.0,
+                        results.total_trades,
+                        results.winning_trades,
+                        results.losing_trades,
+                        results.max_drawdown * 100.0,
+                        results.sharpe_ratio
+                    );
+                    self.bot.send_message(msg.chat.id, message)
+                        .parse_mode(ParseMode::MarkdownV2)
+                        .await?;
+                } else {
+                    self.bot.send_message(msg.chat.id, "Failed to fetch backtest results").await?;
+                }
+            }
+            Command::Help => {
+                let help_text = "Available commands:\n\
+                    /start - Start the bot\n\
+                    /help - Show this help message\n\
+                    /marketdata - Get current market data\n\
+                    /positions - List current positions\n\
+                    /history - View trade history\n\
+                    /status - Check bot status\n\
+                    /backtest - Run backtest";
+                self.bot.send_message(msg.chat.id, help_text).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 async fn command_handler(
@@ -186,7 +345,7 @@ async fn command_handler(
     cmd: Command,
     trading_bot: Arc<Mutex<TradingBot>>,
     trading_enabled: Arc<Mutex<bool>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<()> {
     match cmd {
         Command::Start => {
             bot.send_message(

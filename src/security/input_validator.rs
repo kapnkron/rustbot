@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Result, Error};
 use regex::Regex;
 use log::{info, warn};
 
@@ -11,12 +11,22 @@ impl InputValidator {
     pub fn new(max_length: usize) -> Self {
         Self {
             max_length,
-            pattern: Regex::new(r"^[a-zA-Z0-9_\-\.]+$").unwrap(),
+            pattern: Regex::new(r"^[a-zA-Z0-9_\-\.@\s]+$").unwrap(),
         }
     }
 
     pub fn validate(&self, input: &str) -> Result<bool> {
-        Ok(input.len() <= self.max_length && self.pattern.is_match(input))
+        if input.len() > self.max_length {
+            warn!("Input length {} exceeds maximum allowed length {}", input.len(), self.max_length);
+            return Err(Error::ValidationError("Input too long".to_string()));
+        }
+
+        if !self.pattern.is_match(input) {
+            warn!("Input contains invalid characters: {}", input);
+            return Err(Error::ValidationError("Input contains invalid characters".to_string()));
+        }
+
+        Ok(true)
     }
 }
 

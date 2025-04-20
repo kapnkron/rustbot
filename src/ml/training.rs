@@ -75,11 +75,11 @@ impl ModelTrainer {
         let feature_size = features[0].len() as i64;
         let label_size = labels[0].len() as i64;
 
-        let input = Tensor::of_slice(&features.concat())
+        let input = Tensor::of_slice(&features.iter().flatten().cloned().collect::<Vec<_>>())
             .reshape(&[batch_size, feature_size])
             .to(self.device);
         
-        let target = Tensor::of_slice(&labels.concat())
+        let target = Tensor::of_slice(&labels.iter().flatten().cloned().collect::<Vec<_>>())
             .reshape(&[batch_size, label_size])
             .to(self.device);
         
@@ -147,11 +147,11 @@ impl ModelTrainer {
         let feature_size = features[0].len() as i64;
         let label_size = labels[0].len() as i64;
 
-        let input = Tensor::of_slice(&features.concat())
+        let input = Tensor::of_slice(&features.iter().flatten().cloned().collect::<Vec<_>>())
             .reshape(&[batch_size, feature_size])
             .to(self.device);
         
-        let target = Tensor::of_slice(&labels.concat())
+        let target = Tensor::of_slice(&labels.iter().flatten().cloned().collect::<Vec<_>>())
             .reshape(&[batch_size, label_size])
             .to(self.device);
         
