@@ -1,4 +1,4 @@
-use log::{info, warn, error};
+use log::{info, warn};
 use prometheus::{Counter, Gauge, Histogram, Registry};
 use std::sync::Arc;
 use tokio::sync::Mutex;

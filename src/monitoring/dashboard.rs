@@ -177,7 +177,7 @@ impl Dashboard {
 
     pub async fn start_update_loop(&self) {
         let metrics = self.metrics.clone();
-        let threshold_manager = self.threshold_manager.clone();
+        let _threshold_manager = self.threshold_manager.clone();
         let update_interval = self.update_interval;
 
         tokio::spawn(async move {

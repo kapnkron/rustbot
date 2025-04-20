@@ -172,7 +172,7 @@ impl PerformanceMonitor {
         self.db_start_times.write().await.insert(query_id, Instant::now());
     }
 
-    pub async fn end_db_query(&self, query_id: String, success: bool, slow: bool) -> Result<()> {
+    pub async fn end_db_query(&self, query_id: String, _success: bool, slow: bool) -> Result<()> {
         let start_time = self.db_start_times.write().await.remove(&query_id)
             .ok_or_else(|| anyhow::anyhow!("Query ID not found"))?;
         

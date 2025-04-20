@@ -1,10 +1,8 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
-use log::{info, warn, error};
-use sysinfo::{System, SystemExt, ProcessExt};
+use sysinfo::{System, SystemExt, CpuExt, DiskExt};
 use chrono::{DateTime, Utc};
 use std::sync::atomic::Ordering;
 
@@ -65,12 +63,11 @@ impl HealthMonitor {
         }
     }
 
-    pub async fn update_metrics(&self) -> Result<()> {
-        let mut system = self.system.clone();
-        system.refresh_all();
+    pub async fn update_metrics(&mut self) -> Result<()> {
+        self.system.refresh_all();
 
-        let memory_usage = system.used_memory() as f64 / system.total_memory() as f64 * 100.0;
-        let cpu_usage = system.global_cpu_info().cpu_usage();
+        let memory_usage = self.system.used_memory() as f64 / self.system.total_memory() as f64 * 100.0;
+        let cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
 
         let error_rate = {
             let error_count = *self.error_count.read().await;
@@ -119,13 +116,12 @@ impl HealthMonitor {
         metrics.trading_status = status;
     }
 
-    pub async fn get_metrics(&self) -> Result<HealthMetrics> {
-        let system = &self.system;
-        system.refresh_all();
+    pub async fn get_metrics(&mut self) -> Result<HealthMetrics> {
+        self.system.refresh_all();
 
         Ok(HealthMetrics {
-            cpu_usage: system.global_cpu_info().cpu_usage(),
-            memory_usage: (system.used_memory() as f64 / system.total_memory() as f64) * 100.0,
+            cpu_usage: self.system.global_cpu_info().cpu_usage() as f64,
+            memory_usage: (self.system.used_memory() as f64 / self.system.total_memory() as f64) * 100.0,
             disk_usage: self.get_disk_usage()?,
             error_rate: self.error_rate.load(Ordering::Relaxed) as f64,
             api_status: self.check_api_status().await?,
@@ -144,6 +140,31 @@ impl HealthMonitor {
         metrics.api_status &&
         metrics.db_status &&
         metrics.trading_status
+    }
+
+    fn get_disk_usage(&mut self) -> Result<f64> {
+        self.system.refresh_disks();
+        
+        let total_space: u64 = self.system.disks().iter().map(|d| d.total_space()).sum();
+        let used_space: u64 = self.system.disks().iter().map(|d| d.available_space()).sum();
+        
+        if total_space == 0 {
+            return Ok(0.0);
+        }
+        
+        Ok((1.0 - (used_space as f64 / total_space as f64)) * 100.0)
+    }
+
+    async fn check_api_status(&self) -> Result<bool> {
+        // For now, we'll just return true
+        // In a real implementation, this would check the API connection
+        Ok(true)
+    }
+
+    async fn check_db_status(&self) -> Result<bool> {
+        // For now, we'll just return true
+        // In a real implementation, this would check the database connection
+        Ok(true)
     }
 }
 
