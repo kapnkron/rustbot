@@ -2,6 +2,13 @@ use crate::error::{Result, Error};
 use log::{info, warn};
 use yubikey::{YubiKey, Context};
 use tokio::sync::Mutex;
+use std::convert::From;
+
+impl From<yubikey::Error> for Error {
+    fn from(err: yubikey::Error) -> Self {
+        Error::SecurityError(err.to_string())
+    }
+}
 
 pub struct YubikeyManager {
     context: Mutex<Context>,
@@ -21,24 +28,18 @@ impl YubikeyManager {
         // Find the first available YubiKey
         let yubikey = YubiKey::open()?;
 
-        // For OTP validation, we need to check if the YubiKey is present and responding
-        match yubikey.serial() {
-            Ok(_) => {
-                // In a real implementation, you would validate the OTP against YubiCloud
-                // For now, we'll just check if the OTP is the correct length (44 characters)
-                // and contains only valid characters
-                if otp.len() == 44 && otp.chars().all(|c| c.is_ascii_alphanumeric()) {
-                    info!("Valid YubiKey OTP format received");
-                    Ok(true)
-                } else {
-                    warn!("Invalid YubiKey OTP format");
-                    Ok(false)
-                }
-            }
-            Err(e) => {
-                warn!("YubiKey error: {}", e);
-                Err(Error::SecurityError(e.to_string()))
-            }
+        // Get the serial number
+        let serial = yubikey.serial();
+        
+        // In a real implementation, you would validate the OTP against YubiCloud
+        // For now, we'll just check if the OTP is the correct length (44 characters)
+        // and contains only valid characters
+        if otp.len() == 44 && otp.chars().all(|c| c.is_ascii_alphanumeric()) {
+            info!("Valid YubiKey OTP format received for device {}", serial);
+            Ok(true)
+        } else {
+            warn!("Invalid YubiKey OTP format");
+            Ok(false)
         }
     }
 }

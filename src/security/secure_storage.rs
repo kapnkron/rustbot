@@ -1,7 +1,15 @@
-use crate::error::Result;
+use crate::error::{Result, Error};
 use ring::{aead, rand};
+use ring::rand::SecureRandom;
 use std::path::Path;
 use log::{info, warn};
+use std::array::TryFromSliceError;
+
+impl From<TryFromSliceError> for Error {
+    fn from(err: TryFromSliceError) -> Self {
+        Error::SecurityError(format!("Slice conversion error: {}", err))
+    }
+}
 
 pub struct SecureStorage {
     key: aead::LessSafeKey,
@@ -9,7 +17,7 @@ pub struct SecureStorage {
 }
 
 impl SecureStorage {
-    pub fn new(key_path: &Path) -> Result<Self> {
+    pub fn new(_key_path: &Path) -> Result<Self> {
         let rng = rand::SystemRandom::new();
         let mut key_bytes = vec![0u8; 32];
         rng.fill(&mut key_bytes)?;
@@ -21,17 +29,17 @@ impl SecureStorage {
         let mut nonce = vec![0u8; 12];
         self.rng.fill(&mut nonce)?;
         let mut in_out = data.to_vec();
-        let nonce = aead::Nonce::assume_unique_for_key(&nonce[..12].try_into()?);
+        let nonce = aead::Nonce::assume_unique_for_key(nonce[..12].try_into()?);
         self.key.seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut in_out)?;
         Ok(in_out)
     }
 
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < 12 {
-            return Err(anyhow::anyhow!("Data too short for decryption"));
+            return Err(Error::SecurityError("Data too short for decryption".to_string()));
         }
         let mut in_out = data.to_vec();
-        let nonce = aead::Nonce::assume_unique_for_key(&data[..12].try_into()?);
+        let nonce = aead::Nonce::assume_unique_for_key(data[..12].try_into()?);
         self.key.open_in_place(nonce, aead::Aad::empty(), &mut in_out)?;
         in_out.truncate(in_out.len() - 16); // Remove the authentication tag
         Ok(in_out)

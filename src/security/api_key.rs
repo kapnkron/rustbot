@@ -3,11 +3,11 @@ use ring::rand::SecureRandom;
 use ring::digest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration as TimeDelta};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{info, warn};
-use std::time::Duration;
+use base64::Engine;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ApiKey {
@@ -20,7 +20,7 @@ struct ApiKey {
 
 pub struct ApiKeyManager {
     keys: Arc<Mutex<HashMap<String, ApiKey>>>,
-    rotation_days: Duration,
+    rotation_days: TimeDelta,
 }
 
 impl ApiKey {
@@ -35,10 +35,10 @@ impl ApiKey {
     }
 
     pub fn rotate(&mut self) -> Result<()> {
-        let mut rng = ring::rand::SystemRandom::new();
+        let rng = ring::rand::SystemRandom::new();
         let mut key_bytes = [0u8; 32];
         rng.fill(&mut key_bytes)?;
-        self.key = base64::encode(key_bytes);
+        self.key = base64::engine::general_purpose::STANDARD.encode(key_bytes);
         self.created_at = Utc::now();
         Ok(())
     }
@@ -48,7 +48,7 @@ impl ApiKeyManager {
     pub async fn new(rotation_days: i64) -> Result<Self> {
         Ok(Self {
             keys: Arc::new(Mutex::new(HashMap::new())),
-            rotation_days: Duration::from_secs((rotation_days * 24 * 60 * 60) as u64),
+            rotation_days: TimeDelta::days(rotation_days),
         })
     }
 
@@ -81,10 +81,10 @@ impl ApiKeyManager {
     }
 
     pub async fn generate_key(&mut self, user_id: &str) -> Result<String> {
-        let mut rng = ring::rand::SystemRandom::new();
+        let rng = ring::rand::SystemRandom::new();
         let mut key_bytes = [0u8; 32];
         rng.fill(&mut key_bytes)?;
-        let key = base64::encode(key_bytes);
+        let key = base64::engine::general_purpose::STANDARD.encode(key_bytes);
         
         let api_key = ApiKey::new(key.clone(), user_id.to_string());
         self.keys.lock().await.insert(key.clone(), api_key);

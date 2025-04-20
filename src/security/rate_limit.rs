@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Result, Error};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -20,27 +20,33 @@ impl RateLimiter {
         }
     }
 
-    pub async fn check_limit(&self, ip: &str) -> Result<bool> {
+    pub async fn check(&self, ip: &str) -> Result<bool> {
         let mut requests = self.requests.lock().await;
         let now = Instant::now();
         
-        // Clean up old requests for all IPs
-        for timestamps in requests.values_mut() {
-            timestamps.retain(|&t| now.duration_since(t) < self.window);
+        // Clean up old requests
+        self.cleanup_old_requests(&mut requests, now);
+        
+        // Get or create request history for this IP
+        let ip_requests = requests.entry(ip.to_string())
+            .or_insert_with(Vec::new);
+        
+        // Check if we're under the limit
+        if ip_requests.len() >= self.max_requests as usize {
+            warn!("Rate limit exceeded for IP: {}", ip);
+            return Ok(false);
         }
         
-        // Check limit for specific IP
-        if let Some(timestamps) = requests.get_mut(ip) {
-            if timestamps.len() >= self.max_requests as usize {
-                warn!("Rate limit exceeded for IP: {}", ip);
-                return Ok(false);
-            }
-            timestamps.push(now);
-        } else {
-            requests.insert(ip.to_string(), vec![now]);
-        }
-        
+        // Add new request
+        ip_requests.push(now);
         Ok(true)
+    }
+
+    fn cleanup_old_requests(&self, requests: &mut HashMap<String, Vec<Instant>>, now: Instant) {
+        let window_start = now - self.window;
+        for timestamps in requests.values_mut() {
+            timestamps.retain(|&time| time >= window_start);
+        }
     }
 }
 
@@ -54,9 +60,9 @@ mod tests {
         let limiter = RateLimiter::new(2, Duration::from_secs(1));
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         
-        assert!(limiter.check_limit(ip).await?);
-        assert!(limiter.check_limit(ip).await?);
-        assert!(!limiter.check_limit(ip).await?);
+        assert!(limiter.check(ip).await?);
+        assert!(limiter.check(ip).await?);
+        assert!(!limiter.check(ip).await?);
         
         Ok(())
     }
