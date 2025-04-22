@@ -101,8 +101,8 @@ impl ModelEvaluator {
         let mut squared_errors = Vec::new();
         let mut absolute_errors = Vec::new();
 
-        for (predicted_move, actual_move) in self.predictions.iter() {
-            let diff: f64 = predicted_move - actual_move;
+        for (_, predicted_move, actual_move) in self.predictions.iter() {
+            let diff: f64 = *predicted_move - *actual_move;
             squared_errors.push(diff.powi(2));
             absolute_errors.push(diff.abs());
         }

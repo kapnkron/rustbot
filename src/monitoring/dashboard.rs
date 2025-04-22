@@ -54,6 +54,7 @@ pub struct Alert {
     pub resolved: bool,
 }
 
+#[derive(Clone)]
 pub struct Dashboard {
     metrics: Arc<RwLock<DashboardMetrics>>,
     threshold_manager: Arc<ThresholdManager>,

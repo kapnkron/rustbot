@@ -22,3 +22,25 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Python virtual environment
+venv/
+*.pyc
+__pycache__/
+
+# Environment variables
+.env*
+
+# Logs and data
+data/
+
+# OS-specific files
+Thumbs.db
+
+# IDE settings
+.idea/
+*.iml

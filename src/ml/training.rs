@@ -7,53 +7,60 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{info, warn};
+use super::architecture::{ModelArchitecture, Activation, LossFunction, get_device};
+use crate::trading::TradingMarketData;
+use crate::ml::{ModelConfig, MLConfigError};
 
 pub struct ModelTrainer {
-    config: MLConfig,
+    config: ModelConfig,
     device: Device,
     var_store: nn::VarStore,
     model: nn::Sequential,
+    optimizer: nn::Optimizer,
     best_validation_loss: f64,
     patience_counter: usize,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModelConfig {
+    pub architecture: ModelArchitecture,
+    pub loss_function: LossFunction,
+    pub learning_rate: f64,
+    pub model_path: String,
+    pub window_size: usize,
+    pub training_batch_size: usize,
+    pub training_epochs: usize,
+    pub early_stopping_patience: usize,
+    pub save_best_model: bool,
+}
+
 impl ModelTrainer {
-    pub fn new(config: MLConfig) -> Result<Self> {
-        let device = Device::cuda_if_available();
-        let mut var_store = nn::VarStore::new(device);
-        
-        let model = nn::seq()
-            .add(nn::linear(
-                &var_store.root(),
-                config.input_size,
-                config.hidden_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.relu())
-            .add(nn::linear(
-                &var_store.root(),
-                config.hidden_size,
-                config.output_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.softmax(1, Kind::Float));
+    pub fn new(config: ModelConfig) -> Result<Self> {
+        let device = get_device();
+        let var_store = nn::VarStore::new(device);
+        let model = config.architecture.create_model(&var_store.root())?;
+        let optimizer = nn::Adam::default().build(&var_store, config.learning_rate)?;
 
         Ok(Self {
             config,
             device,
             var_store,
             model,
+            optimizer,
             best_validation_loss: f64::INFINITY,
             patience_counter: 0,
         })
     }
 
-    pub fn train_epoch(
-        &mut self,
-        features: &[Vec<f64>],
-        labels: &[Vec<f64>],
-        batch_size: usize,
-    ) -> Result<f64> {
+    pub fn train_epoch(&mut self, features: &[Vec<f64>], labels: &[Vec<f64>], batch_size: usize) -> Result<f64> {
+        if features.len() != labels.len() {
+            return Err(MLConfigError::InvalidConfig(format!(
+                "Feature and label count mismatch: features {}, labels {}",
+                features.len(),
+                labels.len()
+            )).into());
+        }
+
         let mut total_loss = 0.0;
         let mut count = 0;
 
@@ -70,23 +77,29 @@ impl ModelTrainer {
         Ok(total_loss / count as f64)
     }
 
-    fn train_batch(&mut self, features: &[Vec<f64>], labels: &[Vec<f64>]) -> Result<f64> {
+    pub fn train_batch(&mut self, features: &[Vec<f64>], labels: &[Vec<f64>]) -> Result<f64> {
         let batch_size = features.len() as i64;
         let feature_size = features[0].len() as i64;
         let label_size = labels[0].len() as i64;
 
-        let input = Tensor::of_slice(&features.iter().flatten().cloned().collect::<Vec<_>>())
+        let input = Tensor::f_from_slice(&features.concat())?
             .reshape(&[batch_size, feature_size])
             .to(self.device);
         
-        let target = Tensor::of_slice(&labels.iter().flatten().cloned().collect::<Vec<_>>())
+        let target = Tensor::f_from_slice(&labels.concat())?
             .reshape(&[batch_size, label_size])
             .to(self.device);
         
         let output = self.model.forward(&input);
-        let loss = output.cross_entropy_for_logits(&target);
+        let loss = match self.config.loss_function {
+            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+        };
         
+        self.optimizer.zero_grad();
         loss.backward();
+        self.optimizer.step();
+        
         Ok(loss.double_value(&[]) as f64)
     }
 
@@ -96,11 +109,6 @@ impl ModelTrainer {
         validation_data: &[MarketData],
         early_stopping_patience: Option<usize>,
     ) -> Result<()> {
-        let mut optimizer = nn::Adam::default().build(
-            &self.var_store,
-            self.config.learning_rate,
-        )?;
-
         let patience = early_stopping_patience.unwrap_or(self.config.early_stopping_patience);
         
         for epoch in 0..self.config.training_epochs {
@@ -156,7 +164,10 @@ impl ModelTrainer {
             .to(self.device);
         
         let output = self.model.forward(&input);
-        let loss = output.cross_entropy_for_logits(&target);
+        let loss = match self.config.loss_function {
+            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+        };
         
         Ok(loss.double_value(&[]) as f64)
     }
@@ -191,18 +202,14 @@ mod tests {
 
     #[test]
     fn test_model_trainer() -> Result<()> {
-        let config = MLConfig {
-            input_size: 9,
-            hidden_size: 20,
-            output_size: 2,
+        let config = ModelConfig {
+            architecture: ModelArchitecture::new(9, 20, 2),
+            loss_function: LossFunction::CrossEntropy,
             learning_rate: 0.001,
             model_path: "model.pt".to_string(),
-            confidence_threshold: 0.7,
+            window_size: 10,
             training_batch_size: 32,
             training_epochs: 10,
-            window_size: 10,
-            min_data_points: 100,
-            validation_split: 0.2,
             early_stopping_patience: 5,
             save_best_model: true,
         };

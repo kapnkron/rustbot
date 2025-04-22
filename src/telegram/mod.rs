@@ -30,6 +30,7 @@ pub enum Command {
     Help,
 }
 
+#[derive(Clone)]
 pub struct TelegramBot {
     bot: Bot,
     chat_id: ChatId,
@@ -50,18 +51,33 @@ impl TelegramBot {
     }
 
     pub async fn start(&self) -> Result<()> {
-        let handler = Update::filter_message()
-            .branch(
-                dptree::entry()
-                    .filter_command::<Command>()
-                    .endpoint(command_handler),
-            );
+        let bot = self.bot.clone();
+        let chat_id = self.chat_id;
+        let trading_enabled = self.trading_enabled.clone();
+        let trading_bot = self.trading_bot.clone();
+        let dashboard = self.dashboard.clone();
 
-        Dispatcher::builder(self.bot.clone(), handler)
-            .enable_ctrlc_handler()
-            .build()
-            .dispatch()
-            .await;
+        Command::repl(bot, move |bot: Bot, msg: Message, cmd: Command| {
+            let chat_id = chat_id;
+            let trading_enabled = trading_enabled.clone();
+            let trading_bot = trading_bot.clone();
+            let dashboard = dashboard.clone();
+            let telegram_bot = TelegramBot {
+                bot,
+                chat_id,
+                trading_enabled,
+                trading_bot,
+                dashboard,
+            };
+
+            async move {
+                if let Err(e) = telegram_bot.handle_command(msg, cmd).await {
+                    error!("Error handling command: {}", e);
+                }
+                Ok(())
+            }
+        })
+        .await;
 
         Ok(())
     }
@@ -273,21 +289,27 @@ impl TelegramBot {
                     let message = if history.is_empty() {
                         "No trade history available".to_string()
                     } else {
-                        history.iter()
-                            .map(|t| format!(
-                                "{}: {} {} @ ${:.2} (PnL: ${:.2})",
-                                t.timestamp,
-                                if t.is_buy { "Bought" } else { "Sold" },
-                                t.amount,
-                                t.price,
-                                t.pnl
-                            ))
-                            .collect::<Vec<_>>()
-                            .join("\n")
+                        let mut formatted_history = String::from("📈 Trade History:\n\n");
+                        for trade in history {
+                            formatted_history.push_str(&format!(
+                                "🔹 {} {} {} @ ${:.2}\n   Time: {}\n   PnL: ${:.2}\n\n",
+                                trade.entry_time.format("%Y-%m-%d %H:%M:%S"),
+                                if trade.size > 0.0 { "Bought" } else { "Sold" },
+                                trade.size.abs(),
+                                trade.entry_price,
+                                trade.exit_time.format("%Y-%m-%d %H:%M:%S"),
+                                trade.pnl
+                            ));
+                        }
+                        formatted_history
                     };
-                    self.bot.send_message(msg.chat.id, message).await?;
+                    self.bot.send_message(msg.chat.id, message)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
                 } else {
-                    self.bot.send_message(msg.chat.id, "Failed to fetch trade history").await?;
+                    self.bot.send_message(msg.chat.id, "Failed to fetch trade history")
+                        .parse_mode(ParseMode::Html)
+                        .await?;
                 }
             }
             Command::Backtest => {
@@ -337,108 +359,4 @@ impl TelegramBot {
         }
         Ok(())
     }
-}
-
-async fn command_handler(
-    bot: Bot,
-    msg: Message,
-    cmd: Command,
-    trading_bot: Arc<Mutex<TradingBot>>,
-    trading_enabled: Arc<Mutex<bool>>,
-) -> Result<()> {
-    match cmd {
-        Command::Start => {
-            bot.send_message(
-                msg.chat.id,
-                "Welcome to the Trading Bot! Use /help to see available commands.",
-            )
-            .await?;
-        }
-        Command::Status => {
-            let status = if *trading_enabled.lock().await {
-                "Trading is enabled"
-            } else {
-                "Trading is disabled"
-            };
-            bot.send_message(msg.chat.id, status).await?;
-        }
-        Command::Positions => {
-            let positions = trading_bot.lock().await.get_positions().await?;
-            if positions.is_empty() {
-                bot.send_message(msg.chat.id, "No open positions").await?;
-            } else {
-                let message = positions
-                    .iter()
-                    .map(|p| format!("{}: {} @ ${:.2}", p.symbol, p.amount, p.entry_price))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                bot.send_message(msg.chat.id, format!("Open positions:\n{}", message))
-                    .await?;
-            }
-        }
-        Command::MarketData => {
-            if let Ok(data) = trading_bot.lock().await.get_market_data(&String::new()).await {
-                let message = format!(
-                    "📊 Market Data for {}\n\
-                    Price: ${:.2}\n\
-                    Volume: ${:.2}\n\
-                    Market Cap: ${:.2}\n\
-                    24h Change: {:.2}%",
-                    data.symbol,
-                    data.price,
-                    data.volume,
-                    data.market_cap,
-                    data.price_change_24h
-                );
-                bot.send_message(msg.chat.id, message).await?;
-            } else {
-                bot.send_message(msg.chat.id, "Failed to fetch market data").await?;
-            }
-        }
-        Command::History => {
-            // Implement history retrieval
-            bot.send_message(msg.chat.id, "History retrieval not implemented").await?;
-        }
-        Command::Backtest => {
-            if let Ok(results) = trading_bot.lock().await.get_backtest_results().await {
-                let message = format!(
-                    "📊 *Backtest Results*\n\n\
-                    💰 Initial Balance: ${:.2}\n\
-                    💵 Final Balance: ${:.2}\n\
-                    📈 Total PnL: ${:.2} ({:.2}%)\n\n\
-                    📊 *Performance Metrics*\n\
-                    ✅ Win Rate: {:.2}%\n\
-                    📊 Total Trades: {}\n\
-                    ✅ Winning Trades: {}\n\
-                    ❌ Losing Trades: {}\n\
-                    📉 Max Drawdown: {:.2}%\n\
-                    📊 Sharpe Ratio: {:.2}",
-                    results.initial_balance,
-                    results.initial_balance + results.total_pnl,
-                    results.total_pnl,
-                    (results.total_pnl / results.initial_balance) * 100.0,
-                    results.win_rate * 100.0,
-                    results.total_trades,
-                    results.winning_trades,
-                    results.losing_trades,
-                    results.max_drawdown * 100.0,
-                    results.sharpe_ratio
-                );
-                bot.send_message(msg.chat.id, message)
-                    .parse_mode(ParseMode::MarkdownV2)
-                    .await?;
-            } else {
-                bot.send_message(msg.chat.id, "Failed to fetch backtest results").await?;
-            }
-        }
-        Command::Help => {
-            bot.send_message(
-                msg.chat.id,
-                Command::descriptions().to_string(),
-            )
-            .await?;
-        }
-    }
-
-    Ok(())
 } 

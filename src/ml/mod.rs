@@ -3,7 +3,6 @@ use tch::{Device, Kind, Tensor};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use crate::trading::TradingMarketData;
-use crate::config::MLConfig;
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -19,18 +18,14 @@ pub use evaluation::{ModelEvaluator, ModelMetrics, ConfusionMatrix};
 mod versioning;
 pub use versioning::{ModelVersion, ModelVersionManager};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelConfig {
-    pub input_size: i64,
-    pub hidden_size: i64,
-    pub output_size: i64,
-    pub learning_rate: f64,
-    pub model_path: String,
-    pub window_size: usize,
-}
+mod architecture;
+pub use architecture::{ModelArchitecture, Activation, LossFunction, get_device};
+
+pub mod config;
+pub use config::{MLConfig, ModelConfig, MLConfigError};
 
 pub struct TradingModel {
-    config: MLConfig,
+    config: ModelConfig,
     model: tch::nn::Sequential,
     device: Device,
     var_store: tch::nn::VarStore,
@@ -40,27 +35,21 @@ pub struct TradingModel {
 }
 
 impl TradingModel {
-    pub fn new(config: MLConfig) -> Result<Self> {
-        let var_store = tch::nn::VarStore::new(Device::Cpu);
-        let model = Self::create_model(&var_store.root(), &config)?;
+    pub fn new(config: ModelConfig) -> Result<Self> {
+        let device = get_device();
+        let var_store = tch::nn::VarStore::new(device);
+        let model = config.architecture.create_model(&var_store.root())?;
+        let config_clone = config.clone();
         
         Ok(Self {
             config,
             model,
-            device: Device::Cpu,
+            device,
             var_store,
-            preprocessor: DataPreprocessor::new(config.window_size),
-            evaluator: Arc::new(Mutex::new(ModelEvaluator::new(config.window_size))),
-            version_manager: Arc::new(Mutex::new(ModelVersionManager::new(&config.model_path)?)),
+            preprocessor: DataPreprocessor::new(config_clone.window_size, config_clone.window_size)?,
+            evaluator: Arc::new(Mutex::new(ModelEvaluator::new(config_clone.window_size))),
+            version_manager: Arc::new(Mutex::new(ModelVersionManager::new(&config_clone.model_path)?)),
         })
-    }
-
-    fn create_model(vs: &tch::nn::Path, config: &MLConfig) -> Result<tch::nn::Sequential> {
-        let seq = tch::nn::seq()
-            .add(tch::nn::linear(vs, config.input_size, config.hidden_size, Default::default()))
-            .add_fn(|xs| xs.relu())
-            .add(tch::nn::linear(vs, config.hidden_size, config.output_size, Default::default()));
-        Ok(seq)
     }
 
     pub fn load(&mut self, path: &Path) -> Result<()> {
@@ -73,22 +62,30 @@ impl TradingModel {
         Ok(())
     }
 
-    pub fn process_window(&self, window: &[TradingMarketData]) -> Result<Vec<f64>> {
+    pub fn process_window(&mut self, window: &[TradingMarketData]) -> Result<Vec<f64>> {
+        if window.len() != self.config.window_size {
+            return Err(MLConfigError::InvalidConfig(format!(
+                "Window size mismatch: expected {}, got {}",
+                self.config.window_size,
+                window.len()
+            )).into());
+        }
+
         let mut features = Vec::with_capacity(window.len());
         for data in window {
-            let feature_vec = self.preprocessor.process_market_data(&data.clone().into())?;
+            let feature_vec = self.preprocessor.process_market_data(data)?;
             features.extend(feature_vec);
         }
         Ok(features)
     }
 
-    pub fn process_data(&self, data: &TradingMarketData) -> Result<Vec<f64>> {
-        self.preprocessor.process_market_data(&data.clone().into())
+    pub fn process_data(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
+        self.preprocessor.process_market_data(data)
     }
 
-    pub fn predict(&self, data: &TradingMarketData) -> Result<Vec<f64>> {
+    pub fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
         use tch::nn::ModuleT;
-        let features = self.preprocessor.process_market_data(&data.into())?;
+        let features = self.preprocessor.process_market_data(data)?;
         let input = Tensor::f_from_slice(&features)?;
         let output = self.model.forward_t(&input, false);
         
@@ -108,7 +105,10 @@ impl TradingModel {
         let target = Tensor::f_from_slice(&labels)?;
         
         let output = self.model.forward_t(&input, true);
-        let loss = output.mse_loss(&target, tch::Reduction::Mean);
+        let loss = match self.config.loss_function {
+            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+        };
         
         let mut optimizer = tch::nn::Adam::default().build(&self.var_store, self.config.learning_rate)?;
         optimizer.backward_step(&loss);
@@ -130,7 +130,10 @@ impl TradingModel {
             .to(self.device);
         
         let output = self.model.forward(&input);
-        let loss = output.cross_entropy_for_logits(&target);
+        let loss = match self.config.loss_function {
+            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+        };
         
         loss.backward();
         Ok(loss.double_value(&[]) as f64)
@@ -160,8 +163,9 @@ impl TradingModel {
         Ok(())
     }
 
-    pub fn get_metrics_map(&self) -> HashMap<String, f64> {
-        let metrics = self.evaluator.get_metrics();
+    pub async fn get_metrics_map(&self) -> HashMap<String, f64> {
+        let evaluator = self.evaluator.lock().await;
+        let metrics = evaluator.get_metrics();
         let mut metrics_map = HashMap::new();
         metrics_map.insert("mse".to_string(), metrics.mse);
         metrics_map.insert("mae".to_string(), metrics.mae);
@@ -170,14 +174,14 @@ impl TradingModel {
     }
 
     pub async fn save_version(&mut self) -> Result<()> {
-        let metrics = self.get_metrics_map();
+        let metrics = self.get_metrics_map().await;
         let version = ModelVersion {
             version: "1.0.0".to_string(), // This should be incremented properly
             timestamp: Utc::now(),
-            metrics: metrics,
-            input_size: self.config.input_size,
-            hidden_size: self.config.hidden_size,
-            output_size: self.config.output_size,
+            metrics,
+            input_size: self.config.architecture.input_size,
+            hidden_size: self.config.architecture.hidden_size,
+            output_size: self.config.architecture.output_size,
             learning_rate: self.config.learning_rate,
             window_size: self.config.window_size,
         };
@@ -204,7 +208,7 @@ impl TradingModel {
         for window in data.windows(self.config.window_size + 1) {
             let mut window_features = Vec::new();
             for i in 0..self.config.window_size {
-                let feature_vec = self.preprocessor.process_market_data(&window[i].into())?;
+                let feature_vec = self.preprocessor.process_market_data(&window[i])?;
                 window_features.extend(feature_vec);
             }
             features.extend(window_features);
@@ -214,6 +218,11 @@ impl TradingModel {
         }
         
         Ok((features, labels))
+    }
+
+    pub async fn get_metrics(&self) -> Result<ModelMetrics> {
+        let evaluator = self.evaluator.lock().await;
+        Ok(evaluator.get_metrics())
     }
 }
 
@@ -248,9 +257,12 @@ mod tests {
     #[test]
     fn test_model_creation() {
         let config = ModelConfig {
-            input_size: 9,
-            hidden_size: 20,
-            output_size: 2,
+            architecture: ModelArchitecture {
+                input_size: 9,
+                hidden_size: 20,
+                output_size: 2,
+            },
+            loss_function: LossFunction::MSE,
             learning_rate: 0.001,
             model_path: "model.pt".to_string(),
             window_size: 10,
@@ -262,9 +274,12 @@ mod tests {
     #[test]
     fn test_prediction() {
         let config = ModelConfig {
-            input_size: 9,
-            hidden_size: 20,
-            output_size: 2,
+            architecture: ModelArchitecture {
+                input_size: 9,
+                hidden_size: 20,
+                output_size: 2,
+            },
+            loss_function: LossFunction::MSE,
             learning_rate: 0.001,
             model_path: "model.pt".to_string(),
             window_size: 10,
@@ -282,21 +297,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_evaluation_integration() {
-        let config = MLConfig {
-            input_size: 6,
-            hidden_size: 32,
-            output_size: 2,
+        let config = ModelConfig {
+            architecture: ModelArchitecture {
+                input_size: 6,
+                hidden_size: 32,
+                output_size: 2,
+            },
+            loss_function: LossFunction::MSE,
             learning_rate: 0.001,
             model_path: "test_model.pt".to_string(),
-            confidence_threshold: 0.7,
-            training_batch_size: 32,
-            training_epochs: 10,
             window_size: 10,
-            min_data_points: 100,
-            validation_split: 0.2,
-            early_stopping_patience: 5,
-            save_best_model: true,
-            evaluation_window_size: 100,
         };
 
         let mut model = TradingModel::new(config).unwrap();
@@ -340,21 +350,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_versioning_integration() -> Result<()> {
-        let config = MLConfig {
-            input_size: 6,
-            hidden_size: 32,
-            output_size: 2,
+        let config = ModelConfig {
+            architecture: ModelArchitecture {
+                input_size: 6,
+                hidden_size: 32,
+                output_size: 2,
+            },
+            loss_function: LossFunction::MSE,
             learning_rate: 0.001,
             model_path: "test_model.pt".to_string(),
-            confidence_threshold: 0.7,
-            training_batch_size: 32,
-            training_epochs: 10,
             window_size: 10,
-            min_data_points: 100,
-            validation_split: 0.2,
-            early_stopping_patience: 5,
-            save_best_model: true,
-            evaluation_window_size: 100,
         };
 
         let mut model = TradingModel::new(config)?;

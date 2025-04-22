@@ -9,6 +9,7 @@ use ring;
 use std::io;
 use tch::TchError;
 use serde_urlencoded::de::Error as SerdeUrlencodedError;
+use crate::ml::config::MLConfigError;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -42,6 +43,8 @@ pub enum Error {
     SecurityError(String),
     #[error("ML error: {0}")]
     MLError(String),
+    #[error("ML config error: {0}")]
+    MLConfigError(#[from] MLConfigError),
     #[error("Internal error: {0}")]
     InternalError(String),
     #[error("Trading error: {0}")]

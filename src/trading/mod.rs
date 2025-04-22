@@ -23,7 +23,7 @@ pub struct TradingMarketData {
     pub market_cap: f64,
     pub price_change_24h: f64,
     pub volume_change_24h: f64,
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub timestamp: DateTime<Utc>,
     pub volume_24h: f64,
     pub change_24h: f64,
     pub quote: types::Quote,
@@ -167,6 +167,73 @@ impl TradingBot {
         }
 
         Ok(())
+    }
+
+    pub async fn get_trade_history(&self) -> Result<Vec<Trade>> {
+        let positions = self.positions.lock().await;
+        Ok(positions.iter()
+            .map(|p| Trade {
+                symbol: p.symbol.clone(),
+                size: p.amount,
+                entry_price: p.entry_price,
+                exit_price: p.current_price,
+                entry_time: p.entry_time,
+                exit_time: Utc::now(),
+                pnl: p.unrealized_pnl,
+                pnl_percentage: (p.unrealized_pnl / p.size) * 100.0,
+            })
+            .collect())
+    }
+
+    pub async fn get_backtest_results(&self) -> Result<BacktestResult> {
+        let positions = self.positions.lock().await;
+        let total_trades = positions.len();
+        let winning_trades = positions.iter()
+            .filter(|p| p.unrealized_pnl > 0.0)
+            .count();
+        let losing_trades = total_trades - winning_trades;
+        let win_rate = if total_trades > 0 {
+            winning_trades as f64 / total_trades as f64
+        } else {
+            0.0
+        };
+        let total_pnl = positions.iter()
+            .map(|p| p.unrealized_pnl)
+            .sum();
+        let max_drawdown = positions.iter()
+            .map(|p| (p.current_price - p.entry_price) / p.entry_price)
+            .min_by(|a, b| a.total_cmp(b))
+            .unwrap_or(0.0);
+        let sharpe_ratio = if total_trades > 0 {
+            let avg_return = total_pnl / total_trades as f64;
+            let squared_deviations = positions.iter()
+                .map(|p| {
+                    let diff: f64 = p.unrealized_pnl - avg_return;
+                    diff.powi(2)
+                })
+                .sum::<f64>();
+            let std_dev = (squared_deviations / total_trades as f64).sqrt();
+            if std_dev > 0.0 {
+                avg_return / std_dev
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        Ok(BacktestResult {
+            initial_balance: 10000.0, // This should be configurable
+            total_pnl,
+            total_trades,
+            winning_trades,
+            losing_trades,
+            win_rate,
+            max_drawdown,
+            sharpe_ratio,
+            trades: self.get_trade_history().await?,
+            equity_curve: Vec::new(), // Initialize with empty equity curve
+        })
     }
 }
 

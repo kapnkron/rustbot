@@ -14,4 +14,6 @@ pub mod monitoring;
 pub mod security;
 pub mod telegram;
 pub mod wallet;
-pub mod services; 
+pub mod services;
+
+pub use error::{Error, Result}; 

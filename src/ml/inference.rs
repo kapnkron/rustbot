@@ -8,6 +8,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::{info, warn};
 use std::collections::HashMap;
+use crate::trading::TradingMarketData;
+use crate::ml::{ModelConfig, MLConfigError};
 
 #[derive(Debug, Clone)]
 pub struct Prediction {
@@ -18,7 +20,7 @@ pub struct Prediction {
 }
 
 pub struct ModelInference {
-    config: MLConfig,
+    config: ModelConfig,
     device: Device,
     var_store: nn::VarStore,
     model: nn::Sequential,
@@ -27,25 +29,10 @@ pub struct ModelInference {
 }
 
 impl ModelInference {
-    pub async fn new(config: MLConfig) -> Result<Self> {
-        let device = Device::cuda_if_available();
-        let mut var_store = nn::VarStore::new(device);
-        
-        let model = nn::seq()
-            .add(nn::linear(
-                &var_store.root(),
-                config.input_size,
-                config.hidden_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.relu())
-            .add(nn::linear(
-                &var_store.root(),
-                config.hidden_size,
-                config.output_size,
-                Default::default(),
-            ))
-            .add_fn(|xs| xs.softmax(1, Kind::Float));
+    pub fn new(config: ModelConfig) -> Result<Self> {
+        let device = crate::ml::get_device();
+        let var_store = nn::VarStore::new(device);
+        let model = config.architecture.create_model(&var_store.root())?;
 
         Ok(Self {
             config,
@@ -57,9 +44,53 @@ impl ModelInference {
         })
     }
 
-    pub async fn load(&mut self, path: &Path) -> Result<()> {
+    pub fn load_model(&mut self, path: &Path) -> Result<()> {
         self.var_store.load(path)?;
         Ok(())
+    }
+
+    pub fn predict(&self, features: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
+        if features.is_empty() {
+            return Err(MLConfigError::InvalidConfig("Empty features array".to_string()).into());
+        }
+
+        let batch_size = features.len() as i64;
+        let feature_size = features[0].len() as i64;
+
+        let input = Tensor::f_from_slice(&features.concat())?
+            .reshape(&[batch_size, feature_size])
+            .to(self.device);
+        
+        let output = self.model.forward(&input);
+        
+        let predictions = output.to_kind(Kind::Float).to_device(Device::Cpu);
+        let mut result = Vec::with_capacity(batch_size as usize);
+        
+        for i in 0..batch_size {
+            let row = predictions.get(i);
+            result.push(row.data().to_vec());
+        }
+        
+        Ok(result)
+    }
+
+    pub fn predict_single(&self, features: &[f64]) -> Result<Vec<f64>> {
+        if features.len() != self.config.architecture.input_size {
+            return Err(MLConfigError::InvalidConfig(format!(
+                "Feature size mismatch: expected {}, got {}",
+                self.config.architecture.input_size,
+                features.len()
+            )).into());
+        }
+
+        let input = Tensor::f_from_slice(features)?
+            .reshape(&[1, features.len() as i64])
+            .to(self.device);
+        
+        let output = self.model.forward(&input);
+        let prediction = output.to_kind(Kind::Float).to_device(Device::Cpu);
+        
+        Ok(prediction.data().to_vec())
     }
 
     pub async fn predict(&mut self, data: &MarketData) -> Result<Prediction> {
@@ -186,15 +217,15 @@ mod tests {
             save_best_model: true,
         };
 
-        let mut inference = ModelInference::new(config).await?;
+        let mut inference = ModelInference::new(config)?;
         
         // Test single prediction
         let data = create_test_market_data(50000.0, 1000.0, 1_000_000_000.0);
-        let prediction = inference.predict(&data).await?;
+        let prediction = inference.predict(&[data.features()]).await?;
         
-        assert!(prediction.value == 1.0 || prediction.value == -1.0);
-        assert!(prediction.confidence >= 0.0 && prediction.confidence <= 1.0);
-        assert_eq!(prediction.features.len(), 5);
+        assert!(prediction[0][0] == 1.0 || prediction[0][0] == -1.0);
+        assert!(prediction[0][1] >= 0.0 && prediction[0][1] <= 1.0);
+        assert_eq!(prediction[0].len(), 5);
         
         // Test batch prediction
         let batch_data = vec![
@@ -202,7 +233,7 @@ mod tests {
             create_test_market_data(51000.0, 1100.0, 1_100_000_000.0),
         ];
         
-        let predictions = inference.predict_batch(&batch_data).await?;
+        let predictions = inference.predict(&batch_data.iter().map(|d| d.features()).collect::<Vec<_>>()).await?;
         assert_eq!(predictions.len(), 2);
         
         Ok(())
