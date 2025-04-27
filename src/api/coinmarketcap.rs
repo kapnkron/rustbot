@@ -1,63 +1,67 @@
-use crate::api::{MarketData as ApiMarketData, Quote, ApiError, RateLimiter};
-use crate::utils::cache::Cache;
+use crate::api::{MarketData as ApiMarketData, Quote, ApiError};
 use crate::error::{Result, Error};
 use chrono::{DateTime, Utc};
-use log::info;
+use log::{info, error};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use crate::security::rate_limit::RateLimiter;
+use std::collections::HashMap;
 
+// Define constants locally
 const API_BASE_URL: &str = "https://pro-api.coinmarketcap.com/v1";
-const RATE_LIMIT: Duration = Duration::from_secs(1);
-const MAX_RETRIES: u32 = 3;
-const RETRY_DELAY: Duration = Duration::from_secs(2);
-const CACHE_TTL: i64 = 60; // 1 minute cache
-const RATE_LIMIT_KEY: &str = "coinmarketcap";
+// const MAX_RETRIES: u32 = 3; // Keep commented
+const CACHE_TTL: Duration = Duration::from_secs(60); // Define locally
+const RATE_LIMIT_KEY: &str = "coinmarketcap"; // Define locally
 
 #[derive(Debug, Deserialize)]
 struct CMCResponse<T> {
-    status: CMCStatus,
+    _status: CMCStatus,
     data: Option<T>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CMCStatus {
-    error_code: u32,
-    error_message: Option<String>,
+    _error_code: u32,
+    _error_message: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct CMCToken {
-    id: u32,
-    name: String,
-    symbol: String,
-    slug: String,
+pub struct CMCToken {
+    _id: u32,
+    _name: String,
+    _symbol: String,
+    _slug: String,
     quote: Option<CMCTokenQuote>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct CMCTokenQuote {
+pub struct CMCTokenQuote {
     #[serde(rename = "USD")]
-    usd: Option<CMCTokenQuoteUSD>,
+    _usd: Option<CMCTokenQuoteUSD>,
 }
 
+// Uncommented struct
 #[derive(Debug, Deserialize, Clone)]
 struct CMCTokenQuoteUSD {
-    price: f64,
-    volume_24h: f64,
-    market_cap: f64,
-    percent_change_1h: f64,
-    percent_change_24h: f64,
-    percent_change_7d: f64,
-    last_updated: DateTime<Utc>,
+    _price: f64,
+    _volume_24h: f64,
+    _market_cap: f64,
+    _percent_change_1h: f64,
+    _percent_change_24h: f64,
+    _percent_change_7d: f64,
+    _last_updated: DateTime<Utc>,
 }
 
+// Comment out unused struct
+/*
 #[derive(Debug, Deserialize, Clone)]
 struct CMCTokenList {
     data: Vec<CMCToken>,
 }
+*/
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketData {
@@ -89,146 +93,186 @@ struct USDData {
 
 #[derive(Debug, Clone)]
 pub struct CoinMarketCapClient {
-    client: Client,
-    api_key: String,
     base_url: String,
-    last_request: Instant,
-    token_cache: Cache<CMCToken>,
-    quote_cache: Cache<CMCTokenQuote>,
+    api_key: String,
+    client: Client,
     rate_limiter: Arc<Mutex<RateLimiter>>,
+    _last_request: Instant,
+    token_cache: Arc<Mutex<HashMap<String, (CMCToken, Instant)>>>,
+    quote_cache: Arc<Mutex<HashMap<String, (CMCTokenQuote, Instant)>>>,
 }
 
 impl CoinMarketCapClient {
     pub fn new(api_key: String, rate_limiter: Arc<Mutex<RateLimiter>>) -> Self {
         Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .expect("Failed to create HTTP client"),
+            base_url: API_BASE_URL.to_string(),
             api_key,
-            base_url: "https://pro-api.coinmarketcap.com/v1".to_string(),
-            last_request: Instant::now(),
-            token_cache: Cache::new(CACHE_TTL),
-            quote_cache: Cache::new(CACHE_TTL),
+            client: Client::new(),
             rate_limiter,
+            _last_request: Instant::now(),
+            token_cache: Arc::new(Mutex::new(HashMap::new())),
+            quote_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    async fn wait_for_rate_limit(&mut self) {
-        let elapsed = self.last_request.elapsed();
-        if elapsed < RATE_LIMIT {
-            tokio::time::sleep(RATE_LIMIT - elapsed).await;
+    async fn check_rate_limit_cmc(&self) -> Result<()> {
+        let limiter = self.rate_limiter.lock().await;
+        if !limiter.check(RATE_LIMIT_KEY).await? {
+            return Err(Error::RateLimitExceeded("CoinMarketCap API rate limit exceeded".to_string()));
         }
-        self.last_request = Instant::now();
+        Ok(())
     }
 
     async fn make_request<T: for<'de> Deserialize<'de>>(
         &mut self,
         endpoint: &str,
-        params: &[(&str, &str)],
-        retry_count: u32,
+        params_opt: Option<HashMap<String, String>>,
     ) -> Result<T> {
-        let url = format!("{}{}", API_BASE_URL, endpoint);
-        let mut request = self.client
-            .get(&url)
-            .header("X-CMC_PRO_API_KEY", &self.api_key);
+        self.check_rate_limit_cmc().await?;
 
-        for (key, value) in params {
-            request = request.query(&[(key, value)]);
+        let mut url = format!("{}{}", self.base_url, endpoint);
+        if let Some(ref params) = params_opt {
+            if !params.is_empty() {
+                url.push('?');
+                url.push_str(&serde_urlencoded::to_string(params).map_err(|e| Error::InternalError(e.to_string()))?);
+            }
         }
 
-        match request.send().await {
+        let request_builder = self.client.get(&url).header("X-CMC_PRO_API_KEY", &self.api_key);
+
+        match request_builder.send().await {
             Ok(response) => {
                 match response.status() {
-                    StatusCode::OK => {
-                        response.json::<T>().await.map_err(|e| e.into())
-                    }
-                    StatusCode::TOO_MANY_REQUESTS if retry_count < MAX_RETRIES => {
-                        tokio::time::sleep(Duration::from_secs(2u64.pow(retry_count))).await;
-                        Box::pin(self.make_request(endpoint, params, retry_count + 1)).await
-                    }
+                    StatusCode::OK => response.json::<T>().await.map_err(|e| e.into()),
+                    StatusCode::TOO_MANY_REQUESTS => Err(Error::RateLimitExceeded("CoinMarketCap API rate limit exceeded (429)".to_string())),
                     status => {
-                        Err(ApiError::RequestError(format!(
-                            "Request failed with status: {}", status
-                        )).into())
+                        let body = response.text().await.unwrap_or_else(|_| "<failed to read body>".to_string());
+                        error!("CoinMarketCap API Error: Status {}, Body: {}", status, body);
+                        Err(ApiError::RequestError(format!("Request failed with status: {}", status)).into())
                     }
                 }
             }
             Err(e) => {
-                if retry_count < MAX_RETRIES {
-                    tokio::time::sleep(Duration::from_secs(2u64.pow(retry_count))).await;
-                    Box::pin(self.make_request(endpoint, params, retry_count + 1)).await
-                } else {
-                    Err(e.into())
-                }
+                error!("Reqwest Error for CoinMarketCap: {}", e);
+                Err(e.into())
             }
         }
     }
 
     pub async fn get_token_info(&mut self, token_id: &str) -> Result<CMCToken> {
-        if let Some(cached) = self.token_cache.get(token_id).await {
-            info!("Using cached token info for: {}", token_id);
-            return Ok(cached);
+        let cache_key = token_id.to_string();
+        let current_time = Instant::now();
+        let cache = self.token_cache.lock().await;
+        if let Some((cached_token, timestamp)) = cache.get(&cache_key) {
+            if current_time.duration_since(*timestamp) < CACHE_TTL {
+                info!("Using cached token info for: {}", token_id);
+                return Ok(cached_token.clone());
+            }
         }
+        drop(cache);
 
-        let token_info = self.make_request::<CMCToken>(
-            "cryptocurrency/info",
-            &[("id", token_id)],
-            0
+        let params = HashMap::from([("id".to_string(), token_id.to_string())]);
+        let response = self.make_request::<CMCResponse<HashMap<String, CMCToken>>>(
+            "/cryptocurrency/info", 
+            Some(params),
         ).await?;
         
-        self.token_cache.set(token_id.to_string(), token_info.clone()).await;
+        let token_info = response.data
+            .and_then(|mut data| data.remove(token_id))
+            .ok_or_else(|| Error::ApiInvalidData(format!("Token info not found for id {}", token_id)))?;
+        
+        self.token_cache.lock().await.insert(cache_key, (token_info.clone(), Instant::now()));
         
         Ok(token_info)
     }
 
     pub async fn get_token_quote(&mut self, token_id: &str) -> Result<CMCTokenQuote> {
-        if let Some(cached) = self.quote_cache.get(token_id).await {
-            info!("Using cached quote for: {}", token_id);
-            return Ok(cached);
+        let cache_key = token_id.to_string();
+        let current_time = Instant::now();
+        let cache = self.quote_cache.lock().await;
+        if let Some((cached_quote, timestamp)) = cache.get(&cache_key) {
+            if current_time.duration_since(*timestamp) < CACHE_TTL {
+                info!("Using cached quote for: {}", token_id);
+                return Ok(cached_quote.clone());
+            }
         }
+        drop(cache);
 
-        let quote = self.make_request::<CMCTokenQuote>(
-            "cryptocurrency/quotes/latest",
-            &[("id", token_id), ("convert", "USD")],
-            0
+        let params = HashMap::from([("id".to_string(), token_id.to_string())]);
+        let response = self.make_request::<CMCResponse<HashMap<String, CMCToken>>>(
+            "/cryptocurrency/quotes/latest",
+            Some(params),
         ).await?;
-        
-        self.quote_cache.set(token_id.to_string(), quote.clone()).await;
+
+        let quote = response.data
+            .and_then(|mut data| data.remove(token_id))
+            .and_then(|token| token.quote)
+            .ok_or_else(|| Error::ApiInvalidData(format!("Quote not found for id {}", token_id)))?;
+
+        self.quote_cache.lock().await.insert(cache_key, (quote.clone(), Instant::now()));
         
         Ok(quote)
     }
 
     pub async fn get_top_tokens(&mut self, limit: u32) -> Result<Vec<CMCToken>> {
-        let response = self.make_request::<CMCTokenList>(
-            "cryptocurrency/listings/latest",
-            &[
-                ("start", "1"),
-                ("limit", &limit.to_string()),
-                ("convert", "USD"),
-            ],
-            0
+        let endpoint = "/cryptocurrency/listings/latest";
+        let params = HashMap::from([
+            ("limit".to_string(), limit.to_string()),
+            ("sort".to_string(), "market_cap".to_string()),
+        ]);
+        let response = self.make_request::<CMCResponse<Vec<CMCToken>>>(
+            endpoint, 
+            Some(params),
         ).await?;
-        
-        Ok(response.data)
+        response.data.ok_or_else(|| Error::ApiInvalidData("No data found for top tokens".to_string()))
     }
 
     pub async fn get_trending_tokens(&mut self) -> Result<Vec<CMCToken>> {
-        let response = self.make_request::<CMCTokenList>(
-            "cryptocurrency/trending/latest",
-            &[],
-            0
+        let endpoint = "/cryptocurrency/listings/latest";
+        let params = HashMap::from([
+            ("limit".to_string(), "10".to_string()),
+            ("sort".to_string(), "percent_change_24h".to_string()),
+        ]);
+        let response = self.make_request::<CMCResponse<Vec<CMCToken>>>(
+            endpoint, 
+            Some(params),
         ).await?;
-        
-        Ok(response.data)
+        response.data.ok_or_else(|| Error::ApiInvalidData("No data found for trending tokens".to_string()))
+    }
+
+    pub async fn get_quote(&mut self, symbol: &str) -> Result<CMCTokenQuote> {
+        let endpoint = "/cryptocurrency/quotes/latest";
+        let params = HashMap::from([("symbol".to_string(), symbol.to_string())]);
+        let response = self.make_request::<CMCResponse<HashMap<String, CMCToken>>>(
+            endpoint, 
+            Some(params),
+        ).await?;
+
+        response.data
+            .and_then(|mut data| data.remove(symbol))
+            .and_then(|token| token.quote)
+            .ok_or_else(|| Error::ApiInvalidData(format!("Quote not found for {}", symbol)))
+    }
+
+    pub async fn get_quotes(&mut self, symbols: &[&str]) -> Result<HashMap<String, CMCTokenQuote>> {
+        let endpoint = "/cryptocurrency/quotes/latest";
+        let params = HashMap::from([("symbol".to_string(), symbols.join(",").to_string())]);
+        let response = self.make_request::<CMCResponse<HashMap<String, CMCToken>>>(
+            endpoint, 
+            Some(params),
+        ).await?;
+
+        response.data
+            .map(|data| {
+                data.into_iter()
+                    .filter_map(|(symbol, token)| token.quote.map(|quote| (symbol, quote)))
+                    .collect()
+            })
+            .ok_or_else(|| Error::ApiInvalidData("Quotes not found".to_string()))
     }
 
     pub async fn get_token_quote_from_symbol(&self, symbol: &str) -> Result<Quote> {
-        // Check rate limit
-        let limiter = self.rate_limiter.lock().await;
-        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await {
-            return Err(Error::RateLimitExceeded("API rate limit exceeded".to_string()));
-        }
+        self.check_rate_limit_cmc().await?;
 
         let url = format!("{}/cryptocurrency/quotes/latest", API_BASE_URL);
         let response = self.client
@@ -252,11 +296,7 @@ impl CoinMarketCapClient {
     }
 
     pub async fn get_top_tokens_from_symbols(&self, symbols: &[&str]) -> Result<Vec<String>> {
-        // Check rate limit
-        let limiter = self.rate_limiter.lock().await;
-        if !limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await {
-            return Err(Error::RateLimitExceeded("API rate limit exceeded".to_string()));
-        }
+        self.check_rate_limit_cmc().await?;
 
         let url = format!("{}/cryptocurrency/quotes/latest", API_BASE_URL);
         let response = self.client
@@ -289,7 +329,8 @@ impl CoinMarketCapClient {
     }
 
     pub async fn get_market_data(&self, symbol: &str) -> Result<ApiMarketData> {
-        let url = format!("{}/cryptocurrency/quotes/latest", self.base_url);
+        self.check_rate_limit_cmc().await?;
+        let url = format!("{}/cryptocurrency/quotes/latest", API_BASE_URL);
         let params = [
             ("symbol", symbol),
             ("convert", "USD"),

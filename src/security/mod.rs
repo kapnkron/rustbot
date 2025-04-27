@@ -1,20 +1,12 @@
-use crate::error::{Result, Error};
-use ring::rand::SecureRandom;
-use ring::{aead, digest, hmac, rand};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::error::Result;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use chrono::{DateTime, Utc};
 use std::time::Duration;
-use std::collections::HashSet;
-use std::net::IpAddr;
-use log::{info, warn, error};
 
 mod api_key;
 mod input_validator;
-mod rate_limit;
+pub mod rate_limit;
 mod secure_storage;
 mod yubikey;
 
@@ -24,23 +16,12 @@ pub use rate_limit::RateLimiter;
 pub use secure_storage::SecureStorage;
 pub use yubikey::YubikeyManager;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SecurityConfig {
     pub max_input_length: usize,
     pub rate_limit_requests: u32,
     pub rate_limit_window_seconds: u64,
     pub encryption_key_path: String,
-}
-
-impl Default for SecurityConfig {
-    fn default() -> Self {
-        Self {
-            max_input_length: 1024,
-            rate_limit_requests: 100,
-            rate_limit_window_seconds: 60,
-            encryption_key_path: "keys/encryption.key".to_string(),
-        }
-    }
 }
 
 pub struct SecurityManager {

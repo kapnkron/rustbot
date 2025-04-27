@@ -1,22 +1,23 @@
-use crate::models::market::{TokenData, Candle};
+use crate::models::market::Candle;
 use chrono::{DateTime, Utc};
-use log::{error, info, warn};
+use log::{error, info};
 use reqwest::{Client, StatusCode};
-use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
+use serde::Deserialize;
+use std::time::Instant;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::api::{MarketData as CommonMarketData, Quote};
+use crate::api::types::{MarketData as CommonMarketData, Quote, PriceHistory};
 use crate::api::types::USDData;
-use crate::api::RateLimiter;
+use crate::security::rate_limit::RateLimiter;
 use crate::error::{Result, Error};
 use std::collections::HashMap;
+use crate::utils::cache::Cache;
+use crate::api::ApiError;
 
 const API_BASE_URL: &str = "https://api.coingecko.com/api/v3";
-const RATE_LIMIT: Duration = Duration::from_secs(1);
-const MAX_RETRIES: u32 = 3;
-const RETRY_DELAY: Duration = Duration::from_secs(2);
-const CACHE_TTL: i64 = 60; // 1 minute cache
+// const RATE_LIMIT: Duration = Duration::from_secs(1); // Commented out
+// const MAX_RETRIES: u32 = 3; // Commented out
+const CACHE_TTL: i64 = 60; 
 const RATE_LIMIT_KEY: &str = "coingecko";
 
 #[derive(Debug, Deserialize)]
@@ -25,145 +26,57 @@ struct CoinGeckoResponse<T> {
 }
 
 #[derive(Debug, Deserialize)]
-struct CoinGeckoStatus {
-    error_code: Option<u32>,
-    error_message: Option<String>,
+struct CoinGeckoStatus { 
+    _error_code: Option<u32>,
+    _error_message: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct CoinGeckoToken {
-    id: String,
-    symbol: String,
-    name: String,
-    market_cap_rank: Option<u32>,
-    market_data: Option<CoinGeckoMarketData>,
+#[derive(Debug, Deserialize, Clone)] 
+pub struct CoinGeckoToken { 
+    _id: String, // Mark as unused
+    symbol: String, // Keep symbol as it's used in From impl
+    _name: String, // Mark as unused
+    _market_cap_rank: Option<u32>,
+    market_data: Option<CoinGeckoMarketData>, // Keep as used in From impl
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
-struct CoinGeckoMarketData {
-    current_price: Option<f64>,
-    total_volume: Option<f64>,
-    total_liquidity: Option<f64>,
-    market_cap: Option<f64>,
-    holders: Option<i64>,
-    transactions_24h: Option<i64>,
+#[derive(Debug, Deserialize, Clone, Default)] // Add derive if needed
+struct CoinGeckoMarketData { // Mark unused fields
+    current_price: Option<f64>, // Keep
+    total_volume: Option<f64>, // Keep
+    _total_liquidity: Option<f64>,
+    market_cap: Option<f64>, // Keep
+    _holders: Option<i64>,
+    _transactions_24h: Option<i64>,
 }
 
-#[derive(Debug)]
-struct Cache<T> {
-    data: HashMap<String, (T, Instant)>,
-    ttl: Duration,
-}
-
-impl<T: Clone> Cache<T> {
-    pub fn new(ttl: i64) -> Self {
-        Self {
-            data: HashMap::new(),
-            ttl: Duration::from_secs(ttl.try_into().unwrap()),
-        }
-    }
-
-    pub fn get(&self, key: &str) -> Option<T> {
-        if let Some((value, timestamp)) = self.data.get(key) {
-            if timestamp.elapsed() < self.ttl {
-                return Some(value.clone());
-            }
-        }
-        None
-    }
-
-    pub fn insert(&mut self, key: String, value: T) {
-        self.data.insert(key, (value, Instant::now()));
-    }
-}
-
-impl CoinGeckoToken {
-    fn validate(&self) -> Result<()> {
-        // Validate required string fields
-        if self.id.trim().is_empty() {
-            return Err(Error::ApiInvalidData("Empty token ID".into()));
-        }
-        if self.symbol.trim().is_empty() {
-            return Err(Error::ApiInvalidData("Empty token symbol".into()));
-        }
-        if self.name.trim().is_empty() {
-            return Err(Error::ApiInvalidData("Empty token name".into()));
-        }
-
-        // Validate market data if present
-        if let Some(market_data) = &self.market_data {
-            // Check for negative values
-            if market_data.current_price.unwrap_or_default() < 0.0 {
-                return Err(Error::ApiInvalidData("Negative token price".into()));
-            }
-            if market_data.total_volume.unwrap_or_default() < 0.0 {
-                return Err(Error::ApiInvalidData("Negative trading volume".into()));
-            }
-            if market_data.total_liquidity.unwrap_or_default() < 0.0 {
-                return Err(Error::ApiInvalidData("Negative liquidity".into()));
-            }
-            if market_data.market_cap.unwrap_or_default() < 0.0 {
-                return Err(Error::ApiInvalidData("Negative market cap".into()));
-            }
-            if market_data.holders.unwrap_or_default() < 0 {
-                return Err(Error::ApiInvalidData("Negative holder count".into()));
-            }
-            if market_data.transactions_24h.unwrap_or_default() < 0 {
-                return Err(Error::ApiInvalidData("Negative transaction count".into()));
-            }
-        }
-        Ok(())
-    }
-
-    fn into_token_data(self) -> Result<TokenData> {
-        self.validate()?;
-        
-        let market_data = self.market_data
-            .ok_or_else(|| Error::ApiInvalidData("Missing market data".to_string()))?;
-            
-        Ok(TokenData {
-            address: self.id,
-            symbol: self.symbol.to_uppercase(),
-            name: self.name,
-            price: market_data.current_price.unwrap_or_default(),
-            volume_24h: market_data.total_volume.unwrap_or_default(),
-            liquidity: market_data.total_liquidity.unwrap_or_default(),
-            market_cap: market_data.market_cap.unwrap_or_default(),
-            holders: market_data.holders.unwrap_or_default() as u64,
-            transactions_24h: market_data.transactions_24h.unwrap_or_default() as u64,
-            last_updated: Utc::now(),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PriceHistory {
-    pub timestamps: Vec<i64>,
-    pub prices: Vec<f64>,
-    pub volumes: Vec<f64>,
-}
+// Comment out unused impl block if methods inside are unused
+// impl CoinGeckoToken {
+//     fn validate(&self) -> Result<()> { ... }
+//     fn into_token_data(self) -> Result<TokenData> { ... }
+// }
 
 impl PriceHistory {
     pub fn validate(&self) -> Result<()> {
-        // Check for empty data
-        if self.timestamps.is_empty() || self.prices.is_empty() || self.volumes.is_empty() {
+        // Use correct field names: prices, total_volumes
+        if self.prices.is_empty() || self.total_volumes.is_empty() {
             return Err(Error::ApiInvalidData("Empty price history data".into()));
         }
 
-        // Check all arrays have same length
-        if self.timestamps.len() != self.prices.len() || self.timestamps.len() != self.volumes.len() {
+        // Check prices and volumes have same length (assuming timestamp comes from prices)
+        if self.prices.len() != self.total_volumes.len() {
             return Err(Error::ApiInvalidData("Mismatched array lengths in price history".into()));
         }
 
-        // Validate timestamps are in ascending order
-        for i in 1..self.timestamps.len() {
-            if self.timestamps[i] <= self.timestamps[i-1] {
+        // Validate timestamps are in ascending order (using index 0 of prices)
+        for i in 1..self.prices.len() {
+            if self.prices[i][0] <= self.prices[i-1][0] { // Check timestamp part
                 return Err(Error::ApiInvalidData("Timestamps not in ascending order".into()));
             }
         }
 
-        // Validate prices and volumes are non-negative
-        if self.prices.iter().any(|&p| p < 0.0) || self.volumes.iter().any(|&v| v < 0.0) {
+        // Validate prices (index 1) and volumes (index 1) are non-negative
+        if self.prices.iter().any(|p| p[1] < 0.0) || self.total_volumes.iter().any(|v| v[1] < 0.0) {
             return Err(Error::ApiInvalidData("Negative prices or volumes found".into()));
         }
 
@@ -173,29 +86,34 @@ impl PriceHistory {
     pub fn into_candles(&self) -> Result<Vec<Candle>> {
         self.validate()?;
         
-        let mut candles = Vec::with_capacity(self.timestamps.len());
+        let mut candles = Vec::with_capacity(self.prices.len()); // Use prices length
         
-        for i in 0..self.timestamps.len() {
+        for i in 0..self.prices.len() { // Use prices length
+            let timestamp_ms = self.prices[i][0] as i64; // Timestamp from prices[0]
+            let price = self.prices[i][1]; // Price from prices[1]
+            let volume = self.total_volumes[i][1]; // Volume from total_volumes[1]
+
             // Additional validation for each data point
-            if !self.prices[i].is_finite() {
+            if !price.is_finite() {
                 return Err(Error::ApiInvalidData(format!(
-                    "Invalid price value at index {}: {}", i, self.prices[i]
+                    "Invalid price value at index {}: {}", i, price
                 )));
             }
-            if !self.volumes[i].is_finite() {
+            if !volume.is_finite() {
                 return Err(Error::ApiInvalidData(format!(
-                    "Invalid volume value at index {}: {}", i, self.volumes[i]
+                    "Invalid volume value at index {}: {}", i, volume
                 )));
             }
             
             candles.push(Candle {
-                timestamp: DateTime::from_timestamp(self.timestamps[i], 0).unwrap_or(Utc::now()),
-                open: self.prices[i],
-                high: self.prices[i],
-                low: self.prices[i],
-                close: self.prices[i],
-                volume: self.volumes[i],
-                pair: "".to_string(), // You'll need to provide the pair somehow
+                // Convert ms timestamp to DateTime<Utc>
+                timestamp: DateTime::from_timestamp_millis(timestamp_ms).ok_or_else(|| Error::ApiInvalidData("Invalid timestamp".to_string()))?,
+                open: price, // Use price for O, H, L, C as we only have one value per timestamp
+                high: price,
+                low: price,
+                close: price,
+                volume, 
+                pair: "".to_string(), 
             });
         }
         
@@ -231,43 +149,31 @@ impl From<CoinGeckoToken> for CommonMarketData {
 
 #[derive(Debug)]
 pub struct CoinGeckoClient {
+    base_url: String,
     client: Client,
     api_key: Option<String>,
-    base_url: String,
-    last_request: Instant,
+    rate_limiter: Arc<Mutex<RateLimiter>>,
+    _last_request: Instant, 
     token_cache: Cache<CoinGeckoToken>,
     price_cache: Cache<PriceHistory>,
-    rate_limiter: Arc<Mutex<RateLimiter>>,
 }
 
 impl CoinGeckoClient {
-    pub fn new(api_key: Option<String>, rate_limiter: Arc<Mutex<RateLimiter>>) -> Self {
+     pub fn new(api_key: Option<String>, rate_limiter: Arc<Mutex<RateLimiter>>) -> Self {
         Self {
+            base_url: API_BASE_URL.to_string(),
             client: Client::new(),
             api_key,
-            base_url: "https://api.coingecko.com/api/v3".to_string(),
-            last_request: Instant::now(),
+            rate_limiter,
+            _last_request: Instant::now(), 
             token_cache: Cache::new(CACHE_TTL),
             price_cache: Cache::new(CACHE_TTL),
-            rate_limiter,
         }
     }
 
-    async fn wait_for_rate_limit(&mut self) -> Result<()> {
-        let elapsed = self.last_request.elapsed();
-        if elapsed < RATE_LIMIT {
-            let wait_time = RATE_LIMIT - elapsed;
-            info!("Rate limit wait: {}ms", wait_time.as_millis());
-            tokio::time::sleep(wait_time).await;
-        }
-        self.last_request = Instant::now();
-        Ok(())
-    }
-
-    async fn check_rate_limit(&self) -> Result<()> {
+    async fn check_rate_limit_coingecko(&self) -> Result<()> {
         let limiter = self.rate_limiter.lock().await;
-        let can_proceed = limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await;
-        if !can_proceed {
+        if !limiter.check(RATE_LIMIT_KEY).await? {
             return Err(Error::RateLimitExceeded("CoinGecko API rate limit exceeded".to_string()));
         }
         Ok(())
@@ -276,182 +182,126 @@ impl CoinGeckoClient {
     async fn make_request<T: for<'de> Deserialize<'de>>(
         &mut self,
         endpoint: &str,
-        params: &[(&str, &str)],
-        retry_count: u32,
+        params_opt: Option<HashMap<String, String>>,
     ) -> Result<T> {
-        // Check rate limit with exponential backoff
-        let backoff_duration = if retry_count > 0 {
-            Duration::from_secs(2u64.pow(retry_count))
-        } else {
-            RATE_LIMIT
-        };
+        self.check_rate_limit_coingecko().await?;
 
-        // Check rate limit before making request
-        let can_proceed = {
-            let limiter = self.rate_limiter.lock().await;
-            limiter.check(RATE_LIMIT_KEY, RATE_LIMIT).await
-        };
-        
-        if !can_proceed {
-            if retry_count < MAX_RETRIES {
-                warn!("Rate limit exceeded, backing off for {} seconds...", backoff_duration.as_secs());
-                tokio::time::sleep(backoff_duration).await;
-                return Box::pin(self.make_request::<T>(endpoint, params, retry_count + 1)).await;
+        let mut url = format!("{}{}", self.base_url, endpoint);
+        if let Some(params) = params_opt {
+            if !params.is_empty() {
+                 url.push('?');
+                 let query_string = serde_urlencoded::to_string(&params).map_err(|e| Error::InternalError(e.to_string()))?;
+                 url.push_str(&query_string);
             }
-            return Err(Error::RateLimitExceeded("CoinGecko API rate limit exceeded".to_string()));
         }
 
-        // Build request URL with parameters
-        let url = format!(
-            "{}/{}{}",
-            self.base_url,
-            endpoint,
-            if params.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    "?{}",
-                    params.iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("&")
-                )
-            }
-        );
-
-        // Make the request with proper error handling
-        let mut request = self.client.get(&url);
+        let mut request_builder = self.client.get(&url);
         if let Some(key) = &self.api_key {
-            request = request.header("X-CG-Pro-API-Key", key);
+             request_builder = request_builder.header("x-cg-demo-api-key", key);
         }
 
-        let _response = request.send().await?;
-
-        // Handle response based on status code
-        match _response.status() {
-            status if status.is_success() => {
-                let cg_response: CoinGeckoResponse<T> = match _response.json().await {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        error!("Failed to parse response: {}", e);
-                        return Err(Error::ApiInvalidFormat(format!("Failed to parse response: {}", e)));
-                    }
-                };
-
-                Ok(cg_response.data)
+        match request_builder.send().await {
+            Ok(response) => {
+                 match response.status() {
+                     StatusCode::OK => response.json::<T>().await.map_err(|e| e.into()),
+                     StatusCode::TOO_MANY_REQUESTS => Err(Error::RateLimitExceeded("CoinGecko API rate limit exceeded (429)".to_string())),
+                     status => {
+                         let body = response.text().await.unwrap_or_else(|_| "<failed to read body>".to_string());
+                         error!("CoinGecko API Error: Status {}, Body: {}", status, body);
+                         Err(ApiError::RequestError(format!("Request failed with status: {}", status)).into())
+                     }
+                 }
             }
-            status => {
-                if status == StatusCode::TOO_MANY_REQUESTS {
-                    return Err(Error::RateLimitExceeded("CoinGecko API rate limit exceeded".to_string()));
-                }
-                let error = match status.as_u16() {
-                    429 => {
-                        if retry_count < MAX_RETRIES {
-                            warn!("Rate limit exceeded, backing off for {} seconds...", backoff_duration.as_secs());
-                            tokio::time::sleep(backoff_duration).await;
-                            return Box::pin(self.make_request::<T>(endpoint, params, retry_count + 1)).await;
-                        }
-                        Error::RateLimitExceeded("CoinGecko API rate limit exceeded".to_string())
-                    }
-                    401 => Error::ApiAuthFailed("Authentication failed".into()),
-                    403 => Error::ApiQuotaExceeded("API quota exceeded".into()),
-                    503 => Error::ApiMaintenance("API is under maintenance".into()),
-                    _ => {
-                        let error_msg = format!("API request failed with status: {}", status);
-                        error!("{}", error_msg);
-                        Error::ApiError(error_msg)
-                    }
-                };
-                Err(error)
-            }
+             Err(e) => {
+                 error!("Reqwest Error for CoinGecko: {}", e);
+                 Err(e.into())
+             }
         }
     }
 
-    pub async fn get_token_info(&mut self, token_id: &str) -> Result<TokenData> {
-        if let Some(cached) = self.token_cache.get(token_id) {
+    pub async fn get_token_info(&mut self, token_id: &str) -> Result<CoinGeckoToken> {
+        let cache_key = format!("token_info_{}", token_id);
+        if let Some(cached) = self.token_cache.get(&cache_key).await {
             info!("Using cached token info for: {}", token_id);
-            return cached.into_token_data();
+            return Ok(cached);
         }
+
+        let params = HashMap::from([
+            ("localization".to_string(), "false".to_string()),
+            ("tickers".to_string(), "false".to_string()),
+            ("market_data".to_string(), "true".to_string()),
+        ]);
 
         let token_info = self.make_request::<CoinGeckoToken>(
             &format!("coins/{}", token_id),
-            &[("localization", "false"), ("tickers", "false"), ("market_data", "true")],
-            0
+            Some(params),
         ).await?;
         
-        token_info.validate()?;
-        self.token_cache.insert(token_id.to_string(), token_info.clone());
+        self.token_cache.set(cache_key, token_info.clone()).await;
         
-        token_info.into_token_data()
+        Ok(token_info)
     }
 
-    pub async fn get_price_history(
-        &mut self,
-        token_id: &str,
-        days: u32,
-    ) -> Result<PriceHistory> {
+    pub async fn get_price_history(&mut self, token_id: &str, days: u32) -> Result<PriceHistory> {
+        let cache_key = format!("price_history_{}_{}", token_id, days);
+        if let Some(cached) = self.price_cache.get(&cache_key).await {
+            info!("Using cached price history for: {} ({} days)", token_id, days);
+            return Ok(cached);
+        }
+
+        let params = HashMap::from([
+            ("vs_currency".to_string(), "usd".to_string()),
+            ("days".to_string(), days.to_string()), 
+        ]);
+
         let history = self.make_request::<PriceHistory>(
             &format!("coins/{}/market_chart", token_id),
-            &[("vs_currency", "usd"), ("days", &days.to_string())],
-            0
+            Some(params),
         ).await?;
 
-        history.validate()?;
+        self.price_cache.set(cache_key, history.clone()).await;
         Ok(history)
     }
 
     pub async fn search_tokens(&mut self, query: &str) -> Result<Vec<CoinGeckoToken>> {
-        let tokens = self.make_request::<Vec<CoinGeckoToken>>(
+        let params = HashMap::from([("query".to_string(), query.to_string())]);
+        let response: serde_json::Value = self.make_request(
             "search",
-            &[("query", query)],
-            0
+            Some(params),
         ).await?;
-        
-        // Validate each token
-        for token in &tokens {
-            token.validate()?;
-        }
-        
+        let tokens = serde_json::from_value(response["coins"].clone())?;
         Ok(tokens)
     }
 
     pub async fn get_trending_tokens(&mut self) -> Result<Vec<CoinGeckoToken>> {
-        let tokens = self.make_request::<Vec<CoinGeckoToken>>(
-            "search/trending",
-            &[],
-            0
-        ).await?;
-        
-        // Validate each token
-        for token in &tokens {
-            token.validate()?;
-        }
-        
+        let response: serde_json::Value = self.make_request("search/trending", None).await?;
+        let items = response["coins"].as_array()
+             .ok_or_else(|| Error::ApiInvalidFormat("Missing coins array in trending".to_string()))?;
+        let tokens = items.iter()
+             .filter_map(|wrapper| serde_json::from_value(wrapper["item"].clone()).ok())
+             .collect();
         Ok(tokens)
     }
 
-    pub async fn get_quote_from_symbol(&self, symbol: &str) -> Result<Quote> {
+    pub async fn get_quote_from_symbol(&self, _symbol: &str) -> Result<Quote> {
         // Implementation of get_quote_from_symbol method
         Err(Error::ApiError("Not implemented".to_string()))
     }
 
-    pub async fn get_quotes_from_symbols(&self, symbols: &[&str]) -> Result<Vec<String>> {
-        // Implementation of get_quotes_from_symbols method
+    pub async fn get_quotes_from_symbols(&self, _symbols: &[&str]) -> Result<Vec<String>> {
         Err(Error::ApiError("Not implemented".to_string()))
     }
 
     pub async fn get_exchanges(&self) -> Result<Vec<String>> {
-        // Implementation of get_exchanges method
         Err(Error::ApiError("Not implemented".to_string()))
     }
 
     pub async fn get_market_data(&self, symbol: &str) -> Result<CommonMarketData> {
         let response = self.client.get(&format!("{}/coins/{}", self.base_url, symbol))
-            .header("X-CG-Pro-API-Key", self.api_key.as_ref().unwrap_or(&"".to_string()))
             .send()
             .await?;
 
-        let data: CoinGeckoResponse<CommonMarketData> = response.json().await?;
-        Ok(data.data)
+        let response_data: CoinGeckoResponse<CommonMarketData> = response.json().await?;
+        Ok(response_data.data)
     }
 } 

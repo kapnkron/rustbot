@@ -1,16 +1,14 @@
 use crate::error::{Result, Error};
 use ring::rand::SecureRandom;
-use ring::digest;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use chrono::{DateTime, Utc, Duration as TimeDelta};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use log::{info, warn};
 use base64::Engine;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ApiKey {
+pub struct ApiKey {
     key: String,
     user_id: String,
     created_at: DateTime<Utc>,

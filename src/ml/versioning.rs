@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use log::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelVersion {
@@ -17,6 +16,7 @@ pub struct ModelVersion {
     pub window_size: usize,
 }
 
+#[derive(Debug)]
 pub struct ModelVersionManager {
     versions: HashMap<String, ModelVersion>,
     base_path: String,
@@ -71,7 +71,7 @@ impl ModelVersionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
+    
     use tempfile::tempdir;
 
     #[test]
@@ -101,8 +101,8 @@ mod tests {
 
         let comparison = manager.compare_versions("1.0.0", "1.0.0")?;
         assert_eq!(comparison.len(), 2);
-        assert_eq!(comparison["accuracy_improvement"], 0.0);
-        assert_eq!(comparison["precision_improvement"], 0.0);
+        assert_eq!(comparison["accuracy"], 0.0);
+        assert_eq!(comparison["precision"], 0.0);
 
         Ok(())
     }

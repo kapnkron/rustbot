@@ -1,11 +1,6 @@
 use log::{info, warn};
 use prometheus::{Counter, Gauge, Histogram, Registry};
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use crate::config::{Config, MonitoringConfig, AlertThresholds};
-use crate::api::MarketDataCollector;
+use crate::config::MonitoringConfig;
 use crate::trading::{TradingBot, Position};
 use crate::ml::TradingModel;
 use crate::error::Result;
@@ -20,11 +15,12 @@ pub use health::HealthMetrics;
 pub use performance::PerformanceMetrics;
 
 pub struct Monitor {
-    config: MonitoringConfig,
-    registry: Registry,
-    metrics: Metrics,
-    bot: Arc<Mutex<TradingBot>>,
-    model: Option<Arc<Mutex<TradingModel>>>,
+    // Comment out unused fields
+    // config: MonitoringConfig,
+    // registry: Registry,
+    metrics: Metrics, // Keep metrics as it's initialized and potentially used
+    // bot: Arc<Mutex<TradingBot>>,
+    // model: Option<Arc<Mutex<TradingModel>>>,
 }
 
 #[derive(Clone)]
@@ -94,16 +90,20 @@ impl Metrics {
 }
 
 impl Monitor {
-    pub fn new(config: MonitoringConfig, bot: TradingBot, model: Option<TradingModel>) -> Result<Self> {
-        let registry = Registry::new();
+    pub fn new(
+        _config: MonitoringConfig, 
+        _bot: TradingBot, 
+        _model: Option<TradingModel>
+    ) -> Result<Self> {
+        let registry = Registry::new(); // Keep registry for Metrics init
         let metrics = Metrics::new(&registry)?;
         
         Ok(Self {
-            config,
-            registry,
-            metrics,
-            bot: Arc::new(Mutex::new(bot)),
-            model: model.map(|m| Arc::new(Mutex::new(m))),
+            // config, // Keep commented
+            // registry, // Keep commented
+            metrics, // Keep metrics
+            // bot: Arc::new(Mutex::new(bot)), // Keep commented
+            // model: model.map(|m| Arc::new(Mutex::new(m))), // Keep commented
         })
     }
 
@@ -186,19 +186,28 @@ impl Monitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, ApiConfig, TradingConfig, MonitoringConfig, AlertThresholds, TelegramConfig, DatabaseConfig, SecurityConfig, MLConfig, SolanaConfig, DexTradingConfig};
     use crate::trading::TradingBot;
-    use crate::ml::TradingModel;
+    use crate::ml::{ModelArchitecture, LossFunction, Activation};
+    use crate::api::MarketDataCollector;
+    use std::sync::Arc;
+    use chrono::Utc;
 
-    #[tokio::test]
-    async fn test_monitor_creation() {
-        let config = Config {
-            api: crate::config::ApiConfig {
+    // Helper to create a default test config
+    fn create_test_config() -> Config {
+        let test_architecture = ModelArchitecture {
+            input_size: 10, hidden_size: 20, output_size: 1,
+            num_layers: 1, dropout: None, activation: Activation::ReLU,
+        };
+        let test_loss_function = LossFunction::MSE;
+
+        Config {
+            api: ApiConfig {
                 coingecko_api_key: "test".to_string(),
                 coinmarketcap_api_key: "test".to_string(),
                 cryptodatadownload_api_key: "test".to_string(),
             },
-            trading: crate::config::TradingConfig {
+            trading: TradingConfig {
                 risk_level: 0.1,
                 max_position_size: 1000.0,
                 stop_loss_percentage: 0.05,
@@ -208,26 +217,31 @@ mod tests {
             monitoring: MonitoringConfig {
                 enable_prometheus: false,
                 prometheus_port: 9090,
-                alert_thresholds: crate::config::AlertThresholds {
+                alert_thresholds: AlertThresholds {
                     price_change_threshold: 0.1,
                     volume_threshold: 1000.0,
                     error_rate_threshold: 0.05,
                 },
             },
-            telegram: crate::config::TelegramConfig {
+            telegram: TelegramConfig {
                 bot_token: "test".to_string(),
                 chat_id: "test".to_string(),
                 enable_notifications: true,
             },
-            database: crate::config::DatabaseConfig {
+            database: DatabaseConfig {
                 url: "test".to_string(),
                 max_connections: 10,
             },
-            security: crate::config::SecurityConfig {
+            security: SecurityConfig {
                 enable_2fa: false,
                 api_key_rotation_days: 30,
+                keychain_service_name: "test_keychain".to_string(),
+                solana_key_username: "test_sol_user".to_string(),
+                ton_key_username: "test_ton_user".to_string(),
             },
-            ml: crate::config::MLConfig {
+            ml: MLConfig {
+                architecture: test_architecture,
+                loss_function: test_loss_function,
                 input_size: 10,
                 hidden_size: 20,
                 output_size: 1,
@@ -243,79 +257,45 @@ mod tests {
                 save_best_model: true,
                 evaluation_window_size: 10,
             },
-        };
+            solana: SolanaConfig {
+                rpc_url: "http://localhost:8899".to_string(),
+            },
+            dex_trading: DexTradingConfig {
+                trading_pair_symbol: "SOL/USDC".to_string(),
+                base_token_mint: "So11111111111111111111111111111111111111112".to_string(),
+                quote_token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+                base_token_decimals: 9,
+                quote_token_decimals: 6,
+            },
+        }
+    }
 
-        let market_data_collector = MarketDataCollector::new(
-            "test".to_string(),
-            "test".to_string(),
-            "test".to_string(),
-        );
-        let bot = TradingBot::new(market_data_collector);
-        assert!(Monitor::new(config.monitoring, bot, None).is_ok());
+    #[tokio::test]
+    async fn test_monitor_creation() {
+        let config = create_test_config();
+        let config_arc = Arc::new(config);
+
+        let market_data_collector = Arc::new(MarketDataCollector::new(
+            config_arc.api.coingecko_api_key.clone(),
+            config_arc.api.coinmarketcap_api_key.clone(),
+            config_arc.api.cryptodatadownload_api_key.clone(),
+        ));
+        let bot = TradingBot::new(market_data_collector.clone(), config_arc.clone()).expect("Failed to create bot for test");
+        assert!(Monitor::new(config_arc.monitoring.clone(), bot, None).is_ok());
     }
 
     #[tokio::test]
     async fn test_metrics_recording() {
-        let config = Config {
-            api: crate::config::ApiConfig {
-                coingecko_api_key: "test".to_string(),
-                coinmarketcap_api_key: "test".to_string(),
-                cryptodatadownload_api_key: "test".to_string(),
-            },
-            trading: crate::config::TradingConfig {
-                risk_level: 0.1,
-                max_position_size: 1000.0,
-                stop_loss_percentage: 0.05,
-                take_profit_percentage: 0.1,
-                trading_pairs: vec!["BTC/USD".to_string()],
-            },
-            monitoring: MonitoringConfig {
-                enable_prometheus: false,
-                prometheus_port: 9090,
-                alert_thresholds: crate::config::AlertThresholds {
-                    price_change_threshold: 0.1,
-                    volume_threshold: 1000.0,
-                    error_rate_threshold: 0.05,
-                },
-            },
-            telegram: crate::config::TelegramConfig {
-                bot_token: "test".to_string(),
-                chat_id: "test".to_string(),
-                enable_notifications: true,
-            },
-            database: crate::config::DatabaseConfig {
-                url: "test".to_string(),
-                max_connections: 10,
-            },
-            security: crate::config::SecurityConfig {
-                enable_2fa: false,
-                api_key_rotation_days: 30,
-            },
-            ml: crate::config::MLConfig {
-                input_size: 10,
-                hidden_size: 20,
-                output_size: 1,
-                learning_rate: 0.001,
-                model_path: "test".to_string(),
-                confidence_threshold: 0.8,
-                training_batch_size: 32,
-                training_epochs: 10,
-                window_size: 10,
-                min_data_points: 100,
-                validation_split: 0.2,
-                early_stopping_patience: 3,
-                save_best_model: true,
-                evaluation_window_size: 10,
-            },
-        };
+        let config = create_test_config();
+        let config_arc = Arc::new(config);
 
-        let market_data_collector = MarketDataCollector::new(
-            "test".to_string(),
-            "test".to_string(),
-            "test".to_string(),
-        );
-        let bot = TradingBot::new(market_data_collector);
-        let monitor = Monitor::new(config.monitoring, bot, None).unwrap();
+        let market_data_collector = Arc::new(MarketDataCollector::new(
+            config_arc.api.coingecko_api_key.clone(),
+            config_arc.api.coinmarketcap_api_key.clone(),
+            config_arc.api.cryptodatadownload_api_key.clone(),
+        ));
+        let bot = TradingBot::new(market_data_collector.clone(), config_arc.clone()).expect("Failed to create bot for test");
+        let monitor = Monitor::new(config_arc.monitoring.clone(), bot, None).unwrap();
 
         // Test trade recording
         let trade = crate::trading::Trade {

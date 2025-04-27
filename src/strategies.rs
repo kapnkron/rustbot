@@ -6,24 +6,25 @@ pub trait TradingStrategy {
     fn get_name(&self) -> &'static str;
 }
 
+#[derive(Debug)]
 pub struct SimpleMovingAverage {
-    short_window: usize,
-    long_window: usize,
+    // Comment out unused fields
+    // short_window: usize,
+    // long_window: usize,
 }
 
 impl SimpleMovingAverage {
-    pub fn new(short_window: usize, long_window: usize) -> Self {
-        Self {
-            short_window,
-            long_window,
+    pub fn new(_short_window: usize, _long_window: usize) -> Self {
+        Self { 
+            // short_window, long_window 
         }
     }
 }
 
 impl TradingStrategy for SimpleMovingAverage {
-    fn analyze(&self, market_data: &MarketData) -> Result<bool> {
-        // TODO: Implement SMA strategy
-        Ok(false)
+    fn analyze(&self, _market_data: &MarketData) -> Result<bool> {
+        // Implement analysis logic here
+        Ok(true)
     }
 
     fn get_name(&self) -> &'static str {

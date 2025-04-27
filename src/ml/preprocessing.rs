@@ -3,6 +3,7 @@ use crate::trading::TradingMarketData;
 use crate::ml::MLConfigError;
 use std::collections::VecDeque;
 
+#[derive(Debug)]
 pub struct DataPreprocessor {
     window_size: usize,
     price_history: VecDeque<f64>,
@@ -240,23 +241,36 @@ mod tests {
 
     #[test]
     fn test_preprocessing() -> Result<()> {
-        let mut preprocessor = DataPreprocessor::new(10, 5)?;
+        // Ensure min_data_points >= window_size and >= MACD requirement (26)
+        let window_size = 26;
+        let min_data_points = 26; 
+        let mut preprocessor = DataPreprocessor::new(window_size, min_data_points)?;
         
-        // Test with increasing prices
-        let data = create_test_market_data(100.0, 1000.0, 1_000_000_000.0);
-        let features = preprocessor.process_market_data(&data)?;
-        assert_eq!(features.len(), 11);
+        // Add enough data points to meet min_data_points requirement (and MACD)
+        for i in 0..min_data_points {
+            let price = 100.0 + (i as f64);
+            let volume = 1000.0 + (i as f64 * 10.0);
+            let market_cap = 1_000_000_000.0 + (i as f64 * 1_000_000.0);
+            let data = create_test_market_data(price, volume, market_cap);
+            // Ignore errors until the last point is added
+            if i < min_data_points - 1 {
+                 let _ = preprocessor.process_market_data(&data);
+            } else {
+                // On the last iteration, expect Ok and get features
+                let features = preprocessor.process_market_data(&data)?;
+                assert_eq!(features.len(), 11, "Should have 11 features");
+            }
+        }
         
-        // Test RSI calculation
-        let data2 = create_test_market_data(110.0, 1100.0, 1_100_000_000.0);
-        preprocessor.process_market_data(&data2)?;
+        // Now that we have enough data, test RSI and normalization
         let rsi = preprocessor.calculate_rsi()?;
-        assert!(rsi > 50.0); // Should be bullish
+        assert!(rsi > 50.0, "RSI should indicate upward trend"); 
         
-        // Test normalization
-        let normalized_price = preprocessor.normalize_price(110.0)?;
-        assert!(normalized_price >= 0.0 && normalized_price <= 1.0);
-        
+        let last_price = 100.0 + ((min_data_points - 1) as f64);
+        let normalized_price = preprocessor.normalize_price(last_price)?;
+        assert!(normalized_price >= 0.0 && normalized_price <= 1.0, "Normalized price out of bounds");
+        assert!((normalized_price - 1.0).abs() < f64::EPSILON, "Last price should normalize to 1.0");
+
         Ok(())
     }
 } 

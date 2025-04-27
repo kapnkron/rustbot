@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::fs;
 use anyhow::Result;
+use crate::ml::{ModelArchitecture, LossFunction};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -12,6 +13,8 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub security: SecurityConfig,
     pub ml: MLConfig,
+    pub solana: SolanaConfig,
+    pub dex_trading: DexTradingConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -61,10 +64,15 @@ pub struct DatabaseConfig {
 pub struct SecurityConfig {
     pub enable_2fa: bool,
     pub api_key_rotation_days: u32,
+    pub keychain_service_name: String,
+    pub solana_key_username: String,
+    pub ton_key_username: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MLConfig {
+    pub architecture: ModelArchitecture,
+    pub loss_function: LossFunction,
     pub input_size: i64,
     pub hidden_size: i64,
     pub output_size: i64,
@@ -79,6 +87,20 @@ pub struct MLConfig {
     pub early_stopping_patience: usize,
     pub save_best_model: bool,
     pub evaluation_window_size: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SolanaConfig {
+    pub rpc_url: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DexTradingConfig {
+    pub trading_pair_symbol: String,
+    pub base_token_mint: String,
+    pub quote_token_mint: String,
+    pub base_token_decimals: u8,
+    pub quote_token_decimals: u8,
 }
 
 impl Config {

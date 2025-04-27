@@ -1,6 +1,6 @@
 use crate::error::{Result, Error};
 use regex::Regex;
-use log::{info, warn};
+use log::warn;
 
 pub struct InputValidator {
     max_length: usize,
@@ -35,11 +35,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_input_validator() -> Result<()> {
+    fn test_input_validator() {
         let validator = InputValidator::new(100);
-        assert!(validator.validate("valid_input")?);
-        assert!(!validator.validate("invalid@input")?);
-        assert!(!validator.validate(&"a".repeat(101))?);
-        Ok(())
+
+        assert!(validator.validate("valid_input-_.@ ").is_ok());
+        assert!(validator.validate("valid_input-_.@ ").unwrap());
+
+        assert!(validator.validate("invalid$input").is_err());
+
+        assert!(validator.validate(&"a".repeat(101)).is_err());
     }
 } 

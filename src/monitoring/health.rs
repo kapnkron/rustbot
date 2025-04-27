@@ -1,6 +1,5 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 use tokio::sync::RwLock;
 use sysinfo::{System, SystemExt, CpuExt, DiskExt};
 use chrono::{DateTime, Utc};
@@ -33,7 +32,7 @@ pub struct HealthMonitor {
     metrics: RwLock<HealthMetrics>,
     error_count: RwLock<u32>,
     total_requests: RwLock<u32>,
-    last_check: RwLock<Instant>,
+    // last_check: RwLock<Instant>,
     error_rate: std::sync::atomic::AtomicU64,
 }
 
@@ -58,7 +57,6 @@ impl HealthMonitor {
             }),
             error_count: RwLock::new(0),
             total_requests: RwLock::new(0),
-            last_check: RwLock::new(Instant::now()),
             error_rate: std::sync::atomic::AtomicU64::new(0),
         }
     }

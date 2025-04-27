@@ -1,17 +1,13 @@
-use crate::api::MarketData;
-use crate::trading::TradingSignal;
 use crate::error::Result;
-use log::{info, error};
-use tch::{Device, Tensor};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConfusionMatrix {
     pub true_positives: usize,
-    pub true_negatives: usize,
     pub false_positives: usize,
+    pub true_negatives: usize,
     pub false_negatives: usize,
 }
 
@@ -32,6 +28,7 @@ impl ModelMetrics {
     }
 }
 
+#[derive(Debug)]
 pub struct ModelEvaluator {
     window_size: usize,
     predictions: VecDeque<(DateTime<Utc>, f64, f64)>, // (timestamp, buy_prob, sell_prob)
@@ -118,106 +115,15 @@ impl ModelEvaluator {
         }
     }
 
-    fn calculate_accuracy(&self, predicted: &[f64], actual: &[f64]) -> f64 {
-        let mut correct = 0;
-        let total = predicted.len();
-
-        for (pred, act) in predicted.iter().zip(actual.iter()) {
-            if (pred > &0.5 && act > &0.5) || (pred <= &0.5 && act <= &0.5) {
-                correct += 1;
-            }
-        }
-
-        correct as f64 / total as f64
-    }
-
-    fn calculate_precision(&self, predicted: &[f64], actual: &[f64]) -> f64 {
-        let mut true_positives = 0;
-        let mut false_positives = 0;
-
-        for (pred, act) in predicted.iter().zip(actual.iter()) {
-            if pred > &0.5 {
-                if act > &0.5 {
-                    true_positives += 1;
-                } else {
-                    false_positives += 1;
-                }
-            }
-        }
-
-        if true_positives + false_positives == 0 {
-            0.0
-        } else {
-            true_positives as f64 / (true_positives + false_positives) as f64
-        }
-    }
-
-    fn calculate_recall(&self, predicted: &[f64], actual: &[f64]) -> f64 {
-        let mut true_positives = 0;
-        let mut false_negatives = 0;
-
-        for (pred, act) in predicted.iter().zip(actual.iter()) {
-            if act > &0.5 {
-                if pred > &0.5 {
-                    true_positives += 1;
-                } else {
-                    false_negatives += 1;
-                }
-            }
-        }
-
-        if true_positives + false_negatives == 0 {
-            0.0
-        } else {
-            true_positives as f64 / (true_positives + false_negatives) as f64
-        }
-    }
-
-    fn calculate_f1_score(&self, precision: f64, recall: f64) -> f64 {
-        if precision + recall == 0.0 {
-            0.0
-        } else {
-            2.0 * (precision * recall) / (precision + recall)
-        }
-    }
-
-    fn calculate_confusion_matrix(&self, predicted: &[f64], actual: &[f64]) -> ConfusionMatrix {
-        let mut matrix = ConfusionMatrix {
-            true_positives: 0,
-            true_negatives: 0,
-            false_positives: 0,
-            false_negatives: 0,
-        };
-
-        for (pred, act) in predicted.iter().zip(actual.iter()) {
-            if pred > &0.5 {
-                if act > &0.5 {
-                    matrix.true_positives += 1;
-                } else {
-                    matrix.false_positives += 1;
-                }
-            } else {
-                if act > &0.5 {
-                    matrix.false_negatives += 1;
-                } else {
-                    matrix.true_negatives += 1;
-                }
-            }
-        }
-
-        matrix
-    }
-
-    fn calculate_r2_score(&self, predicted: &[f64], actual: &[f64]) -> f64 {
-        let mean = actual.iter().sum::<f64>() / actual.len() as f64;
-        let total_sum_squares: f64 = actual.iter().map(|&x| (x - mean).powi(2)).sum();
-        let residual_sum_squares: f64 = predicted.iter()
-            .zip(actual.iter())
-            .map(|(&p, &a)| (a - p).powi(2))
-            .sum();
-
-        1.0 - (residual_sum_squares / total_sum_squares)
-    }
+    // Comment out unused methods
+    /*
+    fn calculate_accuracy(&self, predicted: &[f64], actual: &[f64]) -> f64 { ... }
+    fn calculate_precision(&self, predicted: &[f64], actual: &[f64]) -> f64 { ... }
+    fn calculate_recall(&self, predicted: &[f64], actual: &[f64]) -> f64 { ... }
+    fn calculate_f1_score(&self, precision: f64, recall: f64) -> f64 { ... }
+    fn calculate_confusion_matrix(&self, predicted: &[f64], actual: &[f64]) -> ConfusionMatrix { ... }
+    fn calculate_r2_score(&self, predicted: &[f64], actual: &[f64]) -> f64 { ... }
+    */
 }
 
 #[cfg(test)]

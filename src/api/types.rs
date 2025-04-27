@@ -143,4 +143,13 @@ pub struct USDData {
     pub market_cap: f64,
     pub percent_change_24h: f64,
     pub volume_change_24h: f64,
+}
+
+// Added Definition for PriceHistory
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceHistory {
+    // Assuming CoinGecko format: [timestamp_ms, price]
+    pub prices: Vec<[f64; 2]>,
+    pub market_caps: Option<Vec<[f64; 2]>>,
+    pub total_volumes: Vec<[f64; 2]>,
 } 

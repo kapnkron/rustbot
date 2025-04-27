@@ -11,9 +11,8 @@ use trading_bot::monitoring::dashboard::Dashboard;
 use trading_bot::monitoring::thresholds::{ThresholdConfig, SystemThresholds, PerformanceThresholds, TradeThresholds, NotificationSettings};
 use trading_bot::config::Config;
 use trading_bot::trading::TradingBot;
-use trading_bot::api::{MarketData, MarketDataCollector};
+use trading_bot::api::MarketDataCollector;
 use trading_bot::telegram::TelegramBot;
-use trading_bot::trading::TradingSignal;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -42,7 +41,8 @@ async fn main() -> Result<()> {
         .init();
 
     // Load configuration
-    let config = Config::load(&args.config)?;
+    let loaded_config = Config::load(&args.config)?;
+    let config = Arc::new(loaded_config);
     info!("Configuration loaded successfully");
 
     // Create channels for market data and trading signals
@@ -50,14 +50,14 @@ async fn main() -> Result<()> {
     let (signal_tx, mut signal_rx) = mpsc::channel(100);
 
     // Initialize market data collector
-    let market_data_collector = MarketDataCollector::new(
+    let market_data_collector = Arc::new(MarketDataCollector::new(
         config.api.coingecko_api_key.clone(),
         config.api.coinmarketcap_api_key.clone(),
         config.api.cryptodatadownload_api_key.clone(),
-    );
+    ));
 
-    // Initialize trading bot
-    let trading_bot = Arc::new(TradingBot::new(market_data_collector.clone()));
+    // Clone the Arcs when passing them to TradingBot::new
+    let trading_bot = Arc::new(TradingBot::new(market_data_collector.clone(), config.clone())?);
 
     // Create threshold configuration for the dashboard
     let threshold_config = ThresholdConfig {

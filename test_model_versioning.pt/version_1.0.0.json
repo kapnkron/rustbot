@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "timestamp": "2025-04-27T02:25:55.907903483Z",
+  "metrics": {
+    "mse": 0.0,
+    "rmse": 0.0,
+    "mae": 0.0
+  },
+  "input_size": 11,
+  "hidden_size": 32,
+  "output_size": 2,
+  "learning_rate": 0.001,
+  "window_size": 26
+}

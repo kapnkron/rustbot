@@ -3,9 +3,10 @@ use crate::api::MarketDataCollector;
 use teloxide::types::Message;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use log::info;
 
 pub struct TradingBot {
-    market_data_collector: Arc<Mutex<MarketDataCollector>>,
+    _market_data_collector: Arc<Mutex<MarketDataCollector>>,
 }
 
 impl TradingBot {
@@ -15,7 +16,7 @@ impl TradingBot {
         cryptodatadownload_api_key: String,
     ) -> Self {
         Self {
-            market_data_collector: Arc::new(Mutex::new(MarketDataCollector::new(
+            _market_data_collector: Arc::new(Mutex::new(MarketDataCollector::new(
                 coingecko_api_key,
                 coinmarketcap_api_key,
                 cryptodatadownload_api_key,
@@ -23,8 +24,9 @@ impl TradingBot {
         }
     }
 
-    pub async fn handle_message(&self, msg: Message) -> Result<()> {
-        // TODO: Implement message handling logic
+    pub async fn handle_message(&self, _msg: Message) -> Result<()> {
+        info!("Handling message...");
+        // Implement message handling logic here
         Ok(())
     }
 } 

@@ -4,7 +4,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use chrono::{DateTime, Utc};
-use log::{info, warn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeMetrics {

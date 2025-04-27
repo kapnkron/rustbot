@@ -6,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Duration;
 use chrono::{DateTime, Utc};
-use log::{info, warn, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DashboardMetrics {
@@ -277,6 +276,8 @@ impl Dashboard {
 mod tests {
     use super::*;
     use std::time::Duration;
+    use crate::monitoring::thresholds::{SystemThresholds, PerformanceThresholds, TradeThresholds, NotificationSettings};
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_dashboard_creation() {

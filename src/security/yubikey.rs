@@ -23,7 +23,7 @@ impl YubikeyManager {
     }
 
     pub async fn validate_otp(&self, otp: &str) -> Result<bool> {
-        let context = self.context.lock().await;
+        let _context = self.context.lock().await;
         
         // Find the first available YubiKey
         let yubikey = YubiKey::open()?;
@@ -54,8 +54,15 @@ mod tests {
         
         // Note: This test requires a real YubiKey device to be connected
         // For testing purposes, we'll just check that the manager initializes correctly
-        assert!(manager.context.lock().is_ok());
+        let _guard = manager.context.lock().await; // Lock acquired successfully if no panic
         
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_context_lock() {
+        let manager = YubikeyManager::new().unwrap();
+        // Await the lock future. If it doesn't panic, the lock was acquired.
+        let _guard = manager.context.lock().await;
     }
 } 

@@ -1,10 +1,10 @@
-use crate::error::{Result, Error};
+use crate::error::Result;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
-use log::{info, warn};
-use std::net::IpAddr;
+use log::warn;
 
+#[derive(Debug)]
 pub struct RateLimiter {
     requests: Mutex<HashMap<String, Vec<Instant>>>,
     max_requests: u32,
@@ -53,17 +53,22 @@ impl RateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    
 
     #[tokio::test]
-    async fn test_rate_limiter() -> Result<()> {
-        let limiter = RateLimiter::new(2, Duration::from_secs(1));
-        let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+    async fn test_rate_limit() -> Result<()> {
+        use std::net::IpAddr;
+        use std::time::Duration;
         
-        assert!(limiter.check(ip).await?);
-        assert!(limiter.check(ip).await?);
-        assert!(!limiter.check(ip).await?);
-        
+        let limiter = RateLimiter::new(2, Duration::from_millis(100));
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let ip_str = ip.to_string();
+
+        assert!(limiter.check(&ip_str).await?);
+        assert!(limiter.check(&ip_str).await?);
+        assert!(!limiter.check(&ip_str).await?);
+
+        // Wait for the limit to reset
         Ok(())
     }
 } 

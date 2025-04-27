@@ -2,7 +2,6 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use log::{info, warn, error};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThresholdConfig {

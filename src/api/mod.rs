@@ -2,8 +2,9 @@ use crate::error::Result;
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use log::error;
+use crate::security::rate_limit::RateLimiter as SecurityRateLimiter;
 
 pub mod coingecko;
 pub mod coinmarketcap;
@@ -27,39 +28,6 @@ pub enum ApiError {
 }
 
 #[derive(Debug, Clone)]
-pub struct RateLimiter {
-    last_request: Arc<Mutex<Instant>>,
-    min_interval: Duration,
-}
-
-impl RateLimiter {
-    pub fn new() -> Self {
-        Self {
-            last_request: Arc::new(Mutex::new(Instant::now())),
-            min_interval: Duration::from_millis(100), // 10 requests per second
-        }
-    }
-
-    pub async fn wait(&self) {
-        let mut last_request = self.last_request.lock().await;
-        let now = Instant::now();
-        let elapsed = now.duration_since(*last_request);
-        
-        if elapsed < self.min_interval {
-            tokio::time::sleep(self.min_interval - elapsed).await;
-        }
-        
-        *last_request = Instant::now();
-    }
-
-    pub async fn check(&self, _key: &str, interval: Duration) -> bool {
-        let now = Instant::now();
-        let elapsed = now.duration_since(*self.last_request.lock().await);
-        elapsed >= interval
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct MarketDataCollector {
     coingecko: Arc<Mutex<coingecko::CoinGeckoClient>>,
     coinmarketcap: Arc<Mutex<coinmarketcap::CoinMarketCapClient>>,
@@ -72,14 +40,17 @@ impl MarketDataCollector {
         coinmarketcap_api_key: String,
         cryptodatadownload_api_key: String,
     ) -> Self {
+        let coingecko_limiter = Arc::new(Mutex::new(SecurityRateLimiter::new(10, Duration::from_secs(1))));
+        let coinmarketcap_limiter = Arc::new(Mutex::new(SecurityRateLimiter::new(10, Duration::from_secs(1))));
+
         Self {
             coingecko: Arc::new(Mutex::new(coingecko::CoinGeckoClient::new(
                 Some(coingecko_api_key),
-                Arc::new(Mutex::new(RateLimiter::new())),
+                coingecko_limiter,
             ))),
             coinmarketcap: Arc::new(Mutex::new(coinmarketcap::CoinMarketCapClient::new(
                 coinmarketcap_api_key,
-                Arc::new(Mutex::new(RateLimiter::new())),
+                coinmarketcap_limiter,
             ))),
             cryptodatadownload: Arc::new(Mutex::new(cryptodatadownload::CryptoDataDownloadClient::new(
                 cryptodatadownload_api_key,

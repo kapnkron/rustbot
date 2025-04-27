@@ -49,6 +49,12 @@ pub enum Error {
     InternalError(String),
     #[error("Trading error: {0}")]
     TradingError(String),
+    #[error("Solana RPC error: {0}")]
+    SolanaRpcError(String),
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+    #[error("Keychain error: {0}")]
+    KeychainError(String),
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
     #[error("HTTP error: {0}")]
@@ -81,7 +87,7 @@ impl From<prometheus::Error> for Error {
 
 impl From<ring::error::Unspecified> for Error {
     fn from(err: ring::error::Unspecified) -> Self {
-        Error::SecurityError(err.to_string())
+        Error::SecurityError(format!("{:?}", err))
     }
 }
 

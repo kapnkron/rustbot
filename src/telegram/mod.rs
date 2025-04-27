@@ -7,9 +7,9 @@ use teloxide::types::{Message, ParseMode};
 use teloxide::utils::command::BotCommands;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use log::{info, error};
-use chrono::{DateTime, Utc};
-use serde::{Serialize, Deserialize};
+use log::error;
+
+const RECENT_TRADES_LIMIT: usize = 5;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -35,12 +35,12 @@ pub struct TelegramBot {
     bot: Bot,
     chat_id: ChatId,
     trading_enabled: Arc<Mutex<bool>>,
-    trading_bot: Arc<Mutex<TradingBot>>,
+    trading_bot: Arc<Mutex<Arc<TradingBot>>>,
     dashboard: Arc<Mutex<Dashboard>>,
 }
 
 impl TelegramBot {
-    pub fn new(bot_token: String, chat_id: String, trading_bot: TradingBot, dashboard: Dashboard) -> Self {
+    pub fn new(bot_token: String, chat_id: String, trading_bot: Arc<TradingBot>, dashboard: Dashboard) -> Self {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
@@ -91,7 +91,7 @@ impl TelegramBot {
             💵 Price: ${:.2} {}\n\
             📊 24h Change: {:.2}%\n\
             💰 Market Cap: ${:.2}\n\
-            📈 Volume: ${:.2}\n\
+            📈 Volume: ${:.2} {}\n\
             🔄 24h Volume Change: {:.2}%",
             data.symbol,
             data.price,
@@ -99,6 +99,7 @@ impl TelegramBot {
             data.price_change_24h,
             data.market_cap,
             data.volume,
+            volume_change_emoji,
             data.volume_change_24h
         );
 
@@ -180,7 +181,7 @@ impl TelegramBot {
     fn format_recent_trades(&self, trades: &[Trade]) -> String {
         trades.iter()
             .rev()
-            .take(5) // Show last 5 trades
+            .take(RECENT_TRADES_LIMIT)
             .map(|trade| {
                 let pnl_emoji = if trade.pnl >= 0.0 { "✅" } else { "❌" };
                 format!(

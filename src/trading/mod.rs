@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::ml::TradingModel;
-use crate::monitoring::Monitor;
 use crate::api::MarketDataCollector;
 use log::{info, error};
 use crate::api::types;
+use crate::ml::{TradingModel, ModelConfig};
+use crate::config::Config;
+use crate::solana::SolanaManager;
 
 mod risk;
 pub use risk::RiskManager;
@@ -61,16 +62,48 @@ pub struct TradingBot {
     positions: Arc<Mutex<Vec<Position>>>,
     risk_level: Arc<Mutex<f64>>,
     trading_enabled: Arc<Mutex<bool>>,
+    model: Arc<Mutex<TradingModel>>,
+    config: Arc<Config>,
+    risk_manager: Arc<Mutex<RiskManager>>,
+    solana_manager: Arc<SolanaManager>,
 }
 
 impl TradingBot {
-    pub fn new(market_data_collector: MarketDataCollector) -> Self {
-        Self {
-            market_data_collector: Arc::new(Mutex::new(market_data_collector)),
+    pub fn new(market_data_collector: Arc<MarketDataCollector>, config: Arc<Config>) -> Result<Self> {
+        let model_config = ModelConfig::new(
+            config.ml.architecture.clone(),
+            config.ml.loss_function.clone(),
+            config.ml.learning_rate,
+            config.ml.model_path.clone(),
+            config.ml.window_size,
+            config.ml.min_data_points,
+        )?;
+        let trading_model = TradingModel::new(model_config)?;
+        
+        let risk_manager = RiskManager::new(
+            config.trading.max_position_size,
+            config.trading.stop_loss_percentage,
+            config.trading.take_profit_percentage,
+        );
+
+        let solana_manager = SolanaManager::new(config.solana.clone(), &config.security)?;
+
+        Ok(Self {
+            market_data_collector: Arc::new(Mutex::new((*market_data_collector).clone())),
             positions: Arc::new(Mutex::new(Vec::new())),
-            risk_level: Arc::new(Mutex::new(0.5)),
+            risk_level: Arc::new(Mutex::new(config.trading.risk_level)),
             trading_enabled: Arc::new(Mutex::new(false)),
-        }
+            model: Arc::new(Mutex::new(trading_model)),
+            config: Arc::clone(&config),
+            risk_manager: Arc::new(Mutex::new(risk_manager)),
+            solana_manager: Arc::new(solana_manager),
+        })
+    }
+
+    pub async fn enable_trading(&self, enabled: bool) {
+        let mut trading_enabled_guard = self.trading_enabled.lock().await;
+        *trading_enabled_guard = enabled;
+        info!("Trading enabled set to: {}", enabled);
     }
 
     pub async fn get_market_data(&self, symbol: &str) -> Result<TradingMarketData> {
@@ -99,27 +132,46 @@ impl TradingBot {
             return Ok(None);
         }
 
-        // Simple trading strategy based on price and volume changes
-        let signal = if data.price_change_24h > 5.0 && data.volume_change_24h > 20.0 {
-            Some(TradingSignal {
-                symbol: data.symbol.clone(),
-                signal_type: SignalType::Buy,
-                confidence: 0.7,
-                price: data.price,
-            })
-        } else if data.price_change_24h < -5.0 && data.volume_change_24h > 20.0 {
-            Some(TradingSignal {
-                symbol: data.symbol.clone(),
-                signal_type: SignalType::Sell,
-                confidence: 0.7,
-                price: data.price,
-            })
-        } else {
-            None
+        let mut model = self.model.lock().await;
+        let prediction_result = model.predict(&data);
+
+        let signal = match prediction_result {
+            Ok(prediction) => {
+                let buy_confidence = prediction.get(0).cloned().unwrap_or(0.0);
+                let sell_confidence = prediction.get(1).cloned().unwrap_or(0.0);
+                let confidence_threshold = self.config.ml.confidence_threshold;
+
+                if buy_confidence > confidence_threshold && buy_confidence >= sell_confidence {
+                    Some(TradingSignal {
+                        symbol: data.symbol.clone(),
+                        signal_type: SignalType::Buy,
+                        confidence: buy_confidence,
+                        price: data.price,
+                    })
+                } else if sell_confidence > confidence_threshold && sell_confidence > buy_confidence {
+                    Some(TradingSignal {
+                        symbol: data.symbol.clone(),
+                        signal_type: SignalType::Sell,
+                        confidence: sell_confidence,
+                        price: data.price,
+                    })
+                } else {
+                    Some(TradingSignal {
+                        symbol: data.symbol.clone(),
+                        signal_type: SignalType::Hold,
+                        confidence: 1.0 - (buy_confidence - sell_confidence).abs(),
+                        price: data.price,
+                    })
+                }
+            }
+            Err(e) => {
+                error!("Failed to get prediction from model: {}", e);
+                None
+            }
         };
 
         if let Some(ref signal) = signal {
-            info!("Generated trading signal: {:?}", signal);
+            info!("Generated ML trading signal: {:?}", signal);
         }
 
         Ok(signal)
@@ -127,42 +179,142 @@ impl TradingBot {
 
     pub async fn execute_signal(&self, signal: TradingSignal) -> Result<()> {
         if !*self.trading_enabled.lock().await {
+            info!("Trading disabled, skipping signal execution.");
+            return Ok(());
+        }
+        
+        let solana_manager = Arc::clone(&self.solana_manager);
+        let risk_manager = self.risk_manager.lock().await;
+        let config = Arc::clone(&self.config);
+
+        if signal.symbol != config.dex_trading.trading_pair_symbol {
+            info!(
+                "Signal symbol '{}' does not match configured dex_trading pair '{}'. Ignoring DEX trade.",
+                signal.symbol,
+                config.dex_trading.trading_pair_symbol
+            );
             return Ok(());
         }
 
-        let risk_level = *self.risk_level.lock().await;
-        let mut positions = self.positions.lock().await;
-
         match signal.signal_type {
             SignalType::Buy => {
-                // Calculate position size based on risk level
-                let position_size = 1000.0 * risk_level; // Example: $1000 base position size
+                info!("Processing BUY signal for DEX swap...");
+                let confidence = signal.confidence;
+                let max_risk_factor = config.trading.risk_level; 
+                let min_risk_factor = 0.01; 
+                let confidence_threshold = config.ml.confidence_threshold;
+
+                let adjusted_risk_factor = if confidence < confidence_threshold {
+                    min_risk_factor
+                } else {
+                    min_risk_factor + (max_risk_factor - min_risk_factor) * 
+                        (confidence - confidence_threshold) / (1.0 - confidence_threshold).max(f64::EPSILON)
+                }.max(0.0).min(max_risk_factor);
                 
-                positions.push(Position {
+                info!("Adjusted Risk Factor: {:.4}", adjusted_risk_factor);
+
+                let current_price = signal.price;
+                let stop_loss_price = current_price * (1.0 - config.trading.stop_loss_percentage);
+                let quote_token_balance_usd_equivalent = 10000.0;
+
+                let proposed_size_usd = risk_manager.calculate_position_size(
+                    current_price,
+                    stop_loss_price,
+                    quote_token_balance_usd_equivalent,
+                    adjusted_risk_factor,
+                );
+                info!("Proposed USD size for BUY: ${:.2}", proposed_size_usd);
+                
+                if proposed_size_usd <= 0.0 {
+                    info!("Calculated position size is zero or negative. Skipping buy.");
+                    return Ok(());
+                }
+
+                let new_position = Position {
                     symbol: signal.symbol.clone(),
-                    amount: position_size / signal.price,
+                    amount: proposed_size_usd / signal.price,
                     entry_price: signal.price,
                     current_price: signal.price,
                     unrealized_pnl: 0.0,
-                    size: position_size,
+                    size: proposed_size_usd,
                     entry_time: Utc::now(),
-                });
+                };
+                let mut positions = self.positions.lock().await;
+                positions.push(new_position);
+                info!("Opened internal position for {} size ${:.2}", signal.symbol, proposed_size_usd);
+
+                let quote_mint = &config.dex_trading.quote_token_mint;
+                let base_mint = &config.dex_trading.base_token_mint;
+                let quote_decimals = config.dex_trading.quote_token_decimals;
                 
-                info!("Opened long position for {} at ${}", signal.symbol, signal.price);
-            }
-            SignalType::Sell => {
-                // Close any existing positions
-                positions.retain(|p| p.symbol != signal.symbol);
-                info!("Closed position for {} at ${}", signal.symbol, signal.price);
-            }
-            SignalType::Hold => {
-                // Update existing positions
-                for position in positions.iter_mut() {
-                    if position.symbol == signal.symbol {
-                        position.current_price = signal.price;
-                        position.unrealized_pnl = (signal.price - position.entry_price) * position.amount;
+                let input_amount_quote_token = (proposed_size_usd * 10f64.powi(quote_decimals as i32)) as u64;
+                
+                info!(
+                    "Attempting swap: {:.6} {} -> {} (USD Value: {:.2})", 
+                    input_amount_quote_token as f64 / 10f64.powi(quote_decimals as i32),
+                    quote_mint, 
+                    base_mint,
+                    proposed_size_usd
+                );
+
+                match solana_manager.execute_swap(quote_mint, base_mint, input_amount_quote_token).await {
+                    Ok(_) => {
+                        info!("BUY swap executed successfully on Solana.");
+                    }
+                    Err(e) => {
+                        error!("Solana BUY swap failed: {}", e);
                     }
                 }
+            }
+            SignalType::Sell => {
+                info!("Processing SELL signal for DEX swap...");
+                let base_mint = &config.dex_trading.base_token_mint;
+                let quote_mint = &config.dex_trading.quote_token_mint;
+
+                let mut positions = self.positions.lock().await;
+                if let Some(index) = positions.iter().position(|p| p.symbol == signal.symbol) {
+                    let closed_position = positions.remove(index);
+                    info!("Closed internal position for {} size ${:.2} at price {}", 
+                          closed_position.symbol, closed_position.size, signal.price);
+                } else {
+                    info!("Sell signal received, but no internal position found for symbol: {}", signal.symbol);
+                    return Ok(());
+                }
+                
+                // Conditionally compile Solana interaction only for non-test builds
+                #[cfg(not(test))]
+                {
+                    match solana_manager.get_balance(Some(base_mint)).await {
+                        Ok(base_token_balance) => {
+                            if base_token_balance > 0 {
+                                info!(
+                                    "Attempting swap: {} {} -> {}",
+                                    base_token_balance,
+                                    base_mint,
+                                    quote_mint
+                                );
+                                match solana_manager.execute_swap(base_mint, quote_mint, base_token_balance).await {
+                                    Ok(_) => {
+                                        info!("SELL swap executed successfully on Solana.");
+                                    }
+                                    Err(e) => {
+                                        error!("Solana SELL swap failed: {}", e);
+                                    }
+                                }
+                            } else {
+                                info!("Sell signal received, but no balance of {} found to sell.", base_mint);
+                            }
+                        }
+                        Err(e) => {
+                             error!("Failed to get balance for {} to execute sell: {}", base_mint, e);
+                             // Consider returning error here in production? return Err(e.into());
+                        }
+                    }
+                } // End cfg(not(test)) block
+                // --- End Solana interaction block ---
+            }
+            SignalType::Hold => {
+                info!("HOLD signal received. No DEX action taken.");
             }
         }
 
@@ -223,7 +375,7 @@ impl TradingBot {
         };
 
         Ok(BacktestResult {
-            initial_balance: 10000.0, // This should be configurable
+            initial_balance: 10000.0,
             total_pnl,
             total_trades,
             winning_trades,
@@ -232,7 +384,7 @@ impl TradingBot {
             max_drawdown,
             sharpe_ratio,
             trades: self.get_trade_history().await?,
-            equity_curve: Vec::new(), // Initialize with empty equity curve
+            equity_curve: Vec::new(),
         })
     }
 }
@@ -240,45 +392,56 @@ impl TradingBot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
+    
+    use crate::config::{Config, ApiConfig, TradingConfig, MonitoringConfig, AlertThresholds, TelegramConfig, DatabaseConfig, SecurityConfig, MLConfig, SolanaConfig, DexTradingConfig};
+    use std::sync::Arc;
+    use crate::ml::{ModelArchitecture, Activation, LossFunction};
 
-    fn create_test_config() -> crate::config::Config {
-        crate::config::Config {
-            api: crate::config::ApiConfig {
+    fn create_test_config() -> Config {
+        Config {
+            api: ApiConfig {
                 coingecko_api_key: "test".to_string(),
                 coinmarketcap_api_key: "test".to_string(),
                 cryptodatadownload_api_key: "test".to_string(),
             },
-            trading: crate::config::TradingConfig {
+            trading: TradingConfig {
                 risk_level: 0.5,
                 max_position_size: 1000.0,
                 stop_loss_percentage: 0.02,
                 take_profit_percentage: 0.1,
-                trading_pairs: vec!["BTC/USD".to_string()],
+                trading_pairs: vec!["SOL/USDC".to_string()],
             },
-            monitoring: crate::config::MonitoringConfig {
+            monitoring: MonitoringConfig {
                 enable_prometheus: false,
                 prometheus_port: 9090,
-                alert_thresholds: crate::config::AlertThresholds {
+                alert_thresholds: AlertThresholds {
                     price_change_threshold: 0.1,
                     volume_threshold: 1000.0,
                     error_rate_threshold: 0.05,
                 },
             },
-            telegram: crate::config::TelegramConfig {
+            telegram: TelegramConfig {
                 bot_token: "test".to_string(),
                 chat_id: "test".to_string(),
                 enable_notifications: true,
             },
-            database: crate::config::DatabaseConfig {
+            database: DatabaseConfig {
                 url: "test".to_string(),
                 max_connections: 10,
             },
-            security: crate::config::SecurityConfig {
+            security: SecurityConfig {
                 enable_2fa: false,
                 api_key_rotation_days: 30,
+                keychain_service_name: "test-bot".to_string(),
+                solana_key_username: "test-sol-key".to_string(),
+                ton_key_username: "test-ton-key".to_string(),
             },
-            ml: crate::config::MLConfig {
+            ml: MLConfig {
+                architecture: ModelArchitecture {
+                    input_size: 9, hidden_size: 20, output_size: 2,
+                    num_layers: 2, dropout: Some(0.1), activation: Activation::ReLU,
+                },
+                loss_function: LossFunction::MSE,
                 input_size: 9,
                 hidden_size: 20,
                 output_size: 2,
@@ -294,27 +457,53 @@ mod tests {
                 save_best_model: true,
                 evaluation_window_size: 100,
             },
+            solana: SolanaConfig {
+                rpc_url: "http://localhost:8899".to_string(),
+            },
+            dex_trading: DexTradingConfig {
+                trading_pair_symbol: "SOL/USDC".to_string(),
+                base_token_mint: "So11111111111111111111111111111111111111112".to_string(),
+                quote_token_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+                base_token_decimals: 9,
+                quote_token_decimals: 6,
+            },
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_position_management() {
-        let config = create_test_config();
-        let market_data_collector = MarketDataCollector::new(
+        let config = Arc::new(create_test_config());
+        let market_data_collector = Arc::new(MarketDataCollector::new(
             config.api.coingecko_api_key.clone(),
             config.api.coinmarketcap_api_key.clone(),
             config.api.cryptodatadownload_api_key.clone(),
-        );
-        let mut bot = TradingBot::new(market_data_collector);
+        ));
+        let bot = TradingBot::new(market_data_collector.clone(), config.clone()).expect("Failed to create bot");
 
-        // Test opening position
         let signal = TradingSignal {
-            symbol: "BTC".to_string(),
+            symbol: "SOL/USDC".to_string(),
             signal_type: SignalType::Buy,
-            confidence: 100.0,
+            confidence: 1.0,
             price: 100.0,
         };
 
+        *bot.trading_enabled.lock().await = true;
+
         assert!(bot.execute_signal(signal).await.is_ok());
+
+        let positions = bot.get_positions().await.unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].symbol, "SOL/USDC");
+        assert_eq!(positions[0].entry_price, 100.0);
+
+        let close_signal = TradingSignal {
+            symbol: "SOL/USDC".to_string(),
+            signal_type: SignalType::Sell,
+            confidence: 1.0,
+            price: 110.0,
+        };
+        assert!(bot.execute_signal(close_signal).await.is_ok());
+        let positions_after_sell = bot.get_positions().await.unwrap();
+        assert_eq!(positions_after_sell.len(), 0);
     }
 } 

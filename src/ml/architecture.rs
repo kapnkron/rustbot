@@ -1,4 +1,4 @@
-use tch::{Device, Kind, nn};
+use tch::{Device, nn};
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
 
@@ -90,7 +90,7 @@ impl ModelArchitecture {
 }
 
 pub fn get_device() -> Device {
-    if cfg!(feature = "cuda") && tch::Cuda::is_available() {
+    if tch::Cuda::is_available() {
         Device::Cuda(0)
     } else {
         Device::Cpu
