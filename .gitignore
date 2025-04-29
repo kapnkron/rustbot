@@ -44,3 +44,6 @@ Thumbs.db
 # IDE settings
 .idea/
 *.iml
+
+# Backup files
+backup_*.tar.gz
