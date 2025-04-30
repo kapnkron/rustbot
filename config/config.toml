@@ -17,4 +17,12 @@ check_interval = 60
 [security]
 api_key_rotation_days = 30
 rate_limit_requests = 100
-rate_limit_window_seconds = 60 
+rate_limit_window_seconds = 60
+
+[dex_trading]
+trading_pair_symbol = "SOL/USDC" # Placeholder - Update required
+base_token_mint = "So11111111111111111111111111111111111111112" # Placeholder (SOL) - Update required
+quote_token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # Placeholder (USDC) - Update required
+base_token_decimals = 9 # Placeholder (SOL) - Update required
+quote_token_decimals = 6 # Placeholder (USDC) - Update required
+slippage_bps = 50 # Example: 0.5% slippage 

@@ -12,18 +12,18 @@
   - [ ] Check for unused dependencies
   - [ ] Update outdated dependencies
   - [ ] Verify feature flags
-- [ ] Fix YubiKey udev rules
-  - [ ] Create /etc/udev/rules.d/70-yubikey.rules manually
-  - [ ] Set proper permissions
+- [ ] Fix YubiKey udev rules // No longer needed, YubiKey removed
+  // - [ ] Create /etc/udev/rules.d/70-yubikey.rules manually // Removed
+  // - [ ] Set proper permissions // Removed
 
 ## 2. Code Cleanup
 - [ ] Remove unused imports
-  - [ ] Clean up src/trading/mod.rs
-  - [ ] Clean up src/trading/backtest.rs
-  - [ ] Clean up src/ml/mod.rs
+  - [x] Clean up src/trading/mod.rs // Compiler confirms no unused imports
+  - [x] Clean up src/trading/backtest.rs // Compiler confirms no unused imports
+  - [x] Clean up src/ml/mod.rs // Compiler confirms no unused imports
   - [ ] Clean up src/ml/evaluation.rs
   - [ ] Clean up src/monitoring/mod.rs
-  - [ ] Clean up src/security/mod.rs
+  - [ ] Clean up src/security/mod.rs // YubiKey parts removed
   - [ ] Clean up src/telegram/mod.rs
   - [ ] Clean up src/wallet/mod.rs
   - [ ] Clean up src/services/mod.rs
@@ -31,9 +31,9 @@
   - [ ] Add underscore prefix to intentionally unused variables
   - [ ] Remove truly unused variables
 - [ ] Fix visibility issues
-  - [ ] Update struct visibility in src/api/coingecko.rs
-  - [ ] Update struct visibility in src/api/coinmarketcap.rs
-  - [ ] Update struct visibility in src/security/api_key.rs
+  - [x] Update struct visibility in src/api/coingecko.rs // Completed
+  - [x] Update struct visibility in src/api/coinmarketcap.rs // Completed
+  - [x] Update struct visibility in src/security/api_key.rs // Completed
 
 ## 3. Testing Infrastructure
 - [ ] Set up proper test environment
@@ -116,6 +116,10 @@
   - [ ] Implement A/B testing
   - [ ] Set up model retraining
 
+## Refactoring & Cleanup
+- [x] Refactor `src/bin/setup_key.rs` to use command-line args and file inputs instead of interactive prompts and keyring.
+- [x] Remove YubiKey integration code (src/security/yubikey.rs, config, SecurityManager references).
+
 ## Progress Tracking
 - Current Focus: Code Cleanup
 - Next Up: Testing Infrastructure
@@ -129,7 +133,7 @@
 - Document all changes and decisions
 - Keep track of any blockers or issues
 
-# Project Checklist
+# Project Checklist (High Priority / Specific Tasks)
 
 ## High Priority / Blocking
 
@@ -167,12 +171,8 @@
     *   [ ] Implement logic that actually uses the `config`, `registry`, `bot`, and `model` fields within the `Monitor` struct.
 *   **Services:**
     *   [ ] Implement logic for `UserService` and `TradeService` that uses their respective data fields.
-*   **YubiKey Validation:**
-    *   [ ] Implement proper OTP validation (e.g., using YubiCloud API) in `YubikeyManager::validate_otp` instead of just format checking.
 
 ## External/Build Issues
 
 *   **`nom` Dependency:**
     *   [ ] Investigate updating the `nom` crate (or dependencies using it) to resolve the future incompatibility warning.
-*   **YubiKey Udev Rules:**
-    *   [ ] Ensure udev rules are correctly installed in the deployment environment if YubiKey hardware support is required. 

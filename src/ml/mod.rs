@@ -1,4 +1,5 @@
 use crate::error::Result;
+use crate::error::Error;
 use tch::{Device, Tensor};
 use std::path::Path;
 use crate::trading::TradingMarketData;
@@ -8,6 +9,8 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 use tch::nn::Module;
 use log;
+use tch::nn::ModuleT;
+use async_trait::async_trait;
 
 mod preprocessing;
 pub use preprocessing::DataPreprocessor;
@@ -23,6 +26,14 @@ pub use architecture::{ModelArchitecture, Activation, LossFunction, get_device};
 
 pub mod config;
 pub use config::{MLConfig, ModelConfig, MLConfigError};
+
+// --- Predictor Trait --- //
+#[async_trait]
+pub trait Predictor: Send {
+    async fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>>;
+    // Add other methods from TradingModel needed by TradingBot if any
+    // For now, assume only predict is needed by process_market_data
+}
 
 #[derive(Debug)]
 pub struct TradingModel {
@@ -83,33 +94,6 @@ impl TradingModel {
 
     pub fn process_data(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
         self.preprocessor.process_market_data(data)
-    }
-
-    pub fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
-        use tch::nn::ModuleT;
-        let features_f64 = self.preprocessor.process_market_data(data)?;
-        
-        let features_f32: Vec<f32> = features_f64.iter().map(|&x| x as f32).collect();
-        
-        // Use from_slice for f32 tensor creation
-        let input = Tensor::from_slice(&features_f32).to(self.device);
-        
-        // Reshape for batch size 1
-        let input = input.reshape(&[1, -1]); 
-
-        let output = tch::no_grad(|| self.model.forward_t(&input, false));
-        
-        let output_size = output.size().last().cloned().unwrap_or(0);
-        let mut result_f64 = Vec::with_capacity(output_size as usize);
-        for i in 0..output_size {
-             // Get the scalar tensor using correct indexing
-             // Cast index `i` to i64 for tch API
-            let scalar_tensor = output.f_get(0)?.f_get(i as i64)?;
-            // Extract the float value and convert to f64
-            let val_f64 = scalar_tensor.f_double_value(&[])?;
-            result_f64.push(val_f64);
-        }
-        Ok(result_f64)
     }
 
     pub async fn train(&mut self, data: &[TradingMarketData]) -> Result<()> {
@@ -238,6 +222,44 @@ impl TradingModel {
     pub async fn get_metrics(&self) -> Result<ModelMetrics> {
         let evaluator = self.evaluator.lock().await;
         Ok(evaluator.get_metrics())
+    }
+}
+
+// Implement the trait for the real TradingModel
+#[async_trait]
+impl Predictor for TradingModel {
+    async fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
+        let features_f64 = self.preprocessor.process_market_data(data)?;
+
+        // Ensure we have the expected number of features
+        let expected_input_size = self.config.architecture.input_size; // Get from config
+        if features_f64.len() as i64 != expected_input_size { // Compare as i64
+            return Err(Error::MLError(format!(
+                "Preprocessor returned unexpected feature count: expected {}, got {}",
+                expected_input_size,
+                features_f64.len()
+            )));
+        }
+
+        let input = Tensor::f_from_slice(&features_f64)?
+            .reshape(&[1, expected_input_size]) // Reshape for batch size 1 (already i64)
+            .to(self.device);
+
+        // Perform inference within a no_grad block
+        let output = tch::no_grad(|| self.model.forward_t(&input, false));
+
+        // Convert output tensor to Vec<f64>
+        let output_vec: Vec<f64> = Vec::<f64>::try_from(output)?;
+
+        // Record the prediction - Uncommented
+        let mut evaluator = self.evaluator.lock().await; // Use await here
+        // Assuming predict returns probabilities for [Buy, Sell]
+        let buy_prob = output_vec.get(0).cloned().unwrap_or(0.0); // Assuming index 0 is buy prob
+        let sell_prob = output_vec.get(1).cloned().unwrap_or(0.0); // Assuming index 1 is sell prob
+
+        evaluator.record_prediction(data.timestamp, buy_prob, sell_prob); // Pass both probabilities
+
+        Ok(output_vec)
     }
 }
 

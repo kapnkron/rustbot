@@ -1,4 +1,4 @@
-use crate::error::{Result, Error};
+use crate::error::{Result};
 use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -8,12 +8,12 @@ use tokio::sync::Mutex;
 use base64::Engine;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiKey {
-    key: String,
-    user_id: String,
-    created_at: DateTime<Utc>,
-    last_used: DateTime<Utc>,
-    is_active: bool,
+pub(crate) struct ApiKey {
+    pub(crate) key: String,
+    pub(crate) user_id: String,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) last_used: DateTime<Utc>,
+    pub(crate) is_active: bool,
 }
 
 pub struct ApiKeyManager {
@@ -22,7 +22,7 @@ pub struct ApiKeyManager {
 }
 
 impl ApiKey {
-    pub fn new(key: String, user_id: String) -> Self {
+    pub(crate) fn new(key: String, user_id: String) -> Self {
         Self {
             key,
             user_id,
@@ -30,15 +30,6 @@ impl ApiKey {
             last_used: Utc::now(),
             is_active: true,
         }
-    }
-
-    pub fn rotate(&mut self) -> Result<()> {
-        let rng = ring::rand::SystemRandom::new();
-        let mut key_bytes = [0u8; 32];
-        rng.fill(&mut key_bytes)?;
-        self.key = base64::engine::general_purpose::STANDARD.encode(key_bytes);
-        self.created_at = Utc::now();
-        Ok(())
     }
 }
 
@@ -60,16 +51,6 @@ impl ApiKeyManager {
         Ok(false)
     }
 
-    pub async fn rotate_keys(&mut self) -> Result<()> {
-        let mut keys = self.keys.lock().await;
-        for api_key in keys.values_mut() {
-            if Utc::now().signed_duration_since(api_key.created_at) >= self.rotation_days {
-                api_key.rotate()?;
-            }
-        }
-        Ok(())
-    }
-
     pub async fn revoke_key(&mut self, key: &str) -> Result<()> {
         let mut keys = self.keys.lock().await;
         if let Some(api_key) = keys.get_mut(key) {
@@ -89,31 +70,6 @@ impl ApiKeyManager {
         
         Ok(key)
     }
-
-    pub async fn add_key(&self, key: String, api_key: ApiKey) {
-        let mut keys = self.keys.lock().await;
-        keys.insert(key, api_key);
-    }
-
-    pub async fn get_key(&self, key: &str) -> Option<ApiKey> {
-        let keys = self.keys.lock().await;
-        keys.get(key).cloned()
-    }
-
-    pub async fn remove_key(&self, key: &str) -> bool {
-        let mut keys = self.keys.lock().await;
-        keys.remove(key).is_some()
-    }
-
-    pub async fn rotate_key(&self, key: &str) -> Result<()> {
-        let mut keys = self.keys.lock().await;
-        if let Some(api_key) = keys.get_mut(key) {
-            api_key.rotate()?;
-            Ok(())
-        } else {
-            Err(Error::ValidationError("Key not found".to_string()))
-        }
-    }
 }
 
 #[cfg(test)]
@@ -131,9 +87,6 @@ mod tests {
         // Test key revocation
         manager.revoke_key(&key).await?;
         assert!(!manager.validate_key(&key).await?);
-        
-        // Test key rotation
-        manager.rotate_keys().await?;
         
         Ok(())
     }

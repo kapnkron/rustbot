@@ -3,7 +3,7 @@ use crate::trading::{TradingSignal, TradingBot, BacktestResult, Trade};
 use crate::monitoring::dashboard::Dashboard;
 use crate::error::Result;
 use teloxide::prelude::*;
-use teloxide::types::{Message, ParseMode};
+use teloxide::types::ParseMode;
 use teloxide::utils::command::BotCommands;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -34,8 +34,7 @@ pub enum Command {
 pub struct TelegramBot {
     bot: Bot,
     chat_id: ChatId,
-    trading_enabled: Arc<Mutex<bool>>,
-    trading_bot: Arc<Mutex<Arc<TradingBot>>>,
+    trading_bot: Arc<TradingBot>,
     dashboard: Arc<Mutex<Dashboard>>,
 }
 
@@ -44,8 +43,7 @@ impl TelegramBot {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
-            trading_enabled: Arc::new(Mutex::new(false)),
-            trading_bot: Arc::new(Mutex::new(trading_bot)),
+            trading_bot,
             dashboard: Arc::new(Mutex::new(dashboard)),
         }
     }
@@ -53,19 +51,16 @@ impl TelegramBot {
     pub async fn start(&self) -> Result<()> {
         let bot = self.bot.clone();
         let chat_id = self.chat_id;
-        let trading_enabled = self.trading_enabled.clone();
         let trading_bot = self.trading_bot.clone();
         let dashboard = self.dashboard.clone();
 
         Command::repl(bot, move |bot: Bot, msg: Message, cmd: Command| {
             let chat_id = chat_id;
-            let trading_enabled = trading_enabled.clone();
             let trading_bot = trading_bot.clone();
             let dashboard = dashboard.clone();
             let telegram_bot = TelegramBot {
                 bot,
                 chat_id,
-                trading_enabled,
                 trading_bot,
                 dashboard,
             };
@@ -137,10 +132,6 @@ impl TelegramBot {
             .await?;
 
         Ok(())
-    }
-
-    pub async fn is_trading_enabled(&self) -> bool {
-        *self.trading_enabled.lock().await
     }
 
     pub async fn send_backtest_results(&self, results: &BacktestResult) -> Result<()> {
@@ -244,7 +235,7 @@ impl TelegramBot {
                     .await?;
             }
             Command::MarketData => {
-                let trading_bot = self.trading_bot.lock().await;
+                let trading_bot = self.trading_bot.clone();
                 if let Ok(data) = trading_bot.get_market_data(&String::new()).await {
                     let message = format!(
                         "📊 *Market Data*\n\n\
@@ -263,7 +254,7 @@ impl TelegramBot {
                 }
             }
             Command::Positions => {
-                let trading_bot = self.trading_bot.lock().await;
+                let trading_bot = self.trading_bot.clone();
                 if let Ok(positions) = trading_bot.get_positions().await {
                     let message = if positions.is_empty() {
                         "No active positions".to_string()
@@ -285,7 +276,7 @@ impl TelegramBot {
                 }
             }
             Command::History => {
-                let trading_bot = self.trading_bot.lock().await;
+                let trading_bot = self.trading_bot.clone();
                 if let Ok(history) = trading_bot.get_trade_history().await {
                     let message = if history.is_empty() {
                         "No trade history available".to_string()
@@ -314,7 +305,7 @@ impl TelegramBot {
                 }
             }
             Command::Backtest => {
-                let trading_bot = self.trading_bot.lock().await;
+                let trading_bot = self.trading_bot.clone();
                 if let Ok(results) = trading_bot.get_backtest_results().await {
                     let message = format!(
                         "📊 *Backtest Results*\n\n\
@@ -358,6 +349,14 @@ impl TelegramBot {
                 self.bot.send_message(msg.chat.id, help_text).await?;
             }
         }
+        Ok(())
+    }
+
+    pub async fn send_message(&self, message: &str) -> Result<()> {
+        self.bot
+            .send_message(self.chat_id, message)
+            .parse_mode(ParseMode::Html)
+            .await?;
         Ok(())
     }
 } 

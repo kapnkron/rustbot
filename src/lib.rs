@@ -16,5 +16,6 @@ pub mod telegram;
 pub mod wallet;
 pub mod services;
 pub mod solana;
+pub mod cli;
 
 pub use error::{Error, Result}; 

@@ -62,7 +62,6 @@ pub struct DatabaseConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SecurityConfig {
-    pub enable_2fa: bool,
     pub api_key_rotation_days: u32,
     pub keychain_service_name: String,
     pub solana_key_username: String,
@@ -101,6 +100,7 @@ pub struct DexTradingConfig {
     pub quote_token_mint: String,
     pub base_token_decimals: u8,
     pub quote_token_decimals: u8,
+    pub slippage_bps: u16,
 }
 
 impl Config {

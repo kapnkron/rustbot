@@ -30,29 +30,29 @@ struct CMCStatus {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CMCToken {
-    _id: u32,
-    _name: String,
-    _symbol: String,
-    _slug: String,
-    quote: Option<CMCTokenQuote>,
+    pub _id: u32,
+    pub _name: String,
+    pub _symbol: String,
+    pub _slug: String,
+    pub quote: Option<CMCTokenQuote>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CMCTokenQuote {
     #[serde(rename = "USD")]
-    _usd: Option<CMCTokenQuoteUSD>,
+    pub _usd: Option<CMCTokenQuoteUSD>,
 }
 
 // Uncommented struct
 #[derive(Debug, Deserialize, Clone)]
-struct CMCTokenQuoteUSD {
-    _price: f64,
-    _volume_24h: f64,
-    _market_cap: f64,
-    _percent_change_1h: f64,
-    _percent_change_24h: f64,
-    _percent_change_7d: f64,
-    _last_updated: DateTime<Utc>,
+pub struct CMCTokenQuoteUSD {
+    pub _price: f64,
+    pub _volume_24h: f64,
+    pub _market_cap: f64,
+    pub _percent_change_1h: f64,
+    pub _percent_change_24h: f64,
+    pub _percent_change_7d: f64,
+    pub _last_updated: DateTime<Utc>,
 }
 
 // Comment out unused struct
@@ -64,12 +64,12 @@ struct CMCTokenList {
 */
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarketData {
-    pub price: f64,
-    pub volume: f64,
-    pub market_cap: f64,
-    pub price_change_24h: f64,
-    pub volume_change_24h: f64,
+pub(crate) struct MarketData {
+    pub(crate) price: f64,
+    pub(crate) volume: f64,
+    pub(crate) market_cap: f64,
+    pub(crate) price_change_24h: f64,
+    pub(crate) volume_change_24h: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

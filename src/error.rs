@@ -10,10 +10,14 @@ use std::io;
 use tch::TchError;
 use serde_urlencoded::de::Error as SerdeUrlencodedError;
 use crate::ml::config::MLConfigError;
+use solana_client::client_error::ClientError;
+use solana_sdk::signer::keypair::SignerError;
+use solana_program::program_error::ProgramError;
+use keyring::Error as KeyringError;
 
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum Error {
-    #[error("API error: {0}")]
+    #[error("API Error: {0}")]
     ApiError(String),
     #[error("API invalid data: {0}")]
     ApiInvalidData(String),
@@ -37,15 +41,15 @@ pub enum Error {
     ValidationError(String),
     #[error("Database error: {0}")]
     DatabaseError(String),
-    #[error("Configuration error: {0}")]
+    #[error("Configuration Error: {0}")]
     ConfigError(String),
-    #[error("Security error: {0}")]
+    #[error("Security Error: {0}")]
     SecurityError(String),
     #[error("ML error: {0}")]
     MLError(String),
     #[error("ML config error: {0}")]
     MLConfigError(#[from] MLConfigError),
-    #[error("Internal error: {0}")]
+    #[error("Internal Error: {0}")]
     InternalError(String),
     #[error("Trading error: {0}")]
     TradingError(String),
@@ -57,13 +61,21 @@ pub enum Error {
     KeychainError(String),
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
-    #[error("HTTP error: {0}")]
-    HttpError(#[from] reqwest::Error),
+    #[error("HTTP Request Error: {0}")]
+    HttpRequestError(#[from] reqwest::Error),
+    #[error("Signing error: {0}")]
+    SigningError(String),
+    #[error("ML warmup required: {0}")]
+    MLWarmupRequired(String),
+    #[error("Data error: {0}")]
+    DataError(String),
+    #[error("Solana program error: {0}")]
+    SolanaProgramError(#[from] ProgramError),
 }
 
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
-        Error::ApiInvalidFormat(err.to_string())
+        Error::DataError(err.to_string())
     }
 }
 
@@ -111,6 +123,42 @@ impl From<crate::api::ApiError> for Error {
             crate::api::ApiError::ValidationError(msg) => Error::ValidationError(msg),
             crate::api::ApiError::InvalidFormat(msg) => Error::ApiInvalidFormat(msg),
         }
+    }
+}
+
+impl From<ClientError> for Error {
+    fn from(err: ClientError) -> Self {
+        Error::SolanaRpcError(err.to_string())
+    }
+}
+
+impl From<SignerError> for Error {
+    fn from(err: SignerError) -> Self {
+        Error::SigningError(err.to_string())
+    }
+}
+
+impl From<KeyringError> for Error {
+    fn from(err: KeyringError) -> Self {
+        Error::KeychainError(err.to_string())
+    }
+}
+
+impl From<bincode::Error> for Error {
+    fn from(err: bincode::Error) -> Self {
+        Error::InternalError(format!("Bincode Error: {}", err))
+    }
+}
+
+impl From<base64::DecodeError> for Error {
+    fn from(err: base64::DecodeError) -> Self {
+        Error::InternalError(format!("Base64 Decode Error: {}", err))
+    }
+}
+
+impl From<std::array::TryFromSliceError> for Error {
+    fn from(err: std::array::TryFromSliceError) -> Self {
+        Error::InternalError(format!("Slice conversion error: {}", err))
     }
 }
 

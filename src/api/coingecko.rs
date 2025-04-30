@@ -2,7 +2,7 @@ use crate::models::market::Candle;
 use chrono::{DateTime, Utc};
 use log::{error, info};
 use reqwest::{Client, StatusCode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -31,23 +31,23 @@ struct CoinGeckoStatus {
     _error_message: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)] 
-pub struct CoinGeckoToken { 
-    _id: String, // Mark as unused
-    symbol: String, // Keep symbol as it's used in From impl
-    _name: String, // Mark as unused
-    _market_cap_rank: Option<u32>,
-    market_data: Option<CoinGeckoMarketData>, // Keep as used in From impl
+#[derive(Debug, Deserialize, Clone)]
+pub struct CoinGeckoToken {
+    pub(crate) _id: String, // Mark as unused
+    pub(crate) symbol: String, // Keep symbol as it's used in From impl
+    pub(crate) _name: String, // Mark as unused
+    pub(crate) _market_cap_rank: Option<u32>,
+    pub(crate) market_data: Option<CoinGeckoMarketData>, // Keep as used in From impl
 }
 
-#[derive(Debug, Deserialize, Clone, Default)] // Add derive if needed
-struct CoinGeckoMarketData { // Mark unused fields
-    current_price: Option<f64>, // Keep
-    total_volume: Option<f64>, // Keep
-    _total_liquidity: Option<f64>,
-    market_cap: Option<f64>, // Keep
-    _holders: Option<i64>,
-    _transactions_24h: Option<i64>,
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub(crate) struct CoinGeckoMarketData {
+    pub(crate) current_price: Option<f64>, // Keep
+    pub(crate) total_volume: Option<f64>, // Keep
+    pub(crate) _total_liquidity: Option<f64>,
+    pub(crate) market_cap: Option<f64>, // Keep
+    pub(crate) _holders: Option<i64>,
+    pub(crate) _transactions_24h: Option<i64>,
 }
 
 // Comment out unused impl block if methods inside are unused
@@ -153,7 +153,7 @@ pub struct CoinGeckoClient {
     client: Client,
     api_key: Option<String>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
-    _last_request: Instant, 
+    _last_request: Instant,
     token_cache: Cache<CoinGeckoToken>,
     price_cache: Cache<PriceHistory>,
 }
@@ -276,10 +276,14 @@ impl CoinGeckoClient {
     pub async fn get_trending_tokens(&mut self) -> Result<Vec<CoinGeckoToken>> {
         let response: serde_json::Value = self.make_request("search/trending", None).await?;
         let items = response["coins"].as_array()
-             .ok_or_else(|| Error::ApiInvalidFormat("Missing coins array in trending".to_string()))?;
-        let tokens = items.iter()
-             .filter_map(|wrapper| serde_json::from_value(wrapper["item"].clone()).ok())
-             .collect();
+            .ok_or_else(|| Error::ApiInvalidFormat("Missing 'coins' array in trending response".into()))?;
+        
+        let mut tokens = Vec::new();
+        for item_value in items {
+            let item = item_value["item"].clone();
+            let token: CoinGeckoToken = serde_json::from_value(item).map_err(|e| Error::ParseError(e.to_string()))?;
+            tokens.push(token);
+        }
         Ok(tokens)
     }
 

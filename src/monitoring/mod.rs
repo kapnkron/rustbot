@@ -1,9 +1,8 @@
 use log::{info, warn};
 use prometheus::{Counter, Gauge, Histogram, Registry};
-use crate::config::MonitoringConfig;
-use crate::trading::{TradingBot, Position};
-use crate::ml::TradingModel;
+use crate::trading::Position;
 use crate::error::Result;
+use std::sync::Arc;
 
 pub mod dashboard;
 pub mod thresholds;
@@ -15,10 +14,9 @@ pub use health::HealthMetrics;
 pub use performance::PerformanceMetrics;
 
 pub struct Monitor {
-    // Comment out unused fields
     // config: MonitoringConfig,
     // registry: Registry,
-    metrics: Metrics, // Keep metrics as it's initialized and potentially used
+    metrics: Metrics,
     // bot: Arc<Mutex<TradingBot>>,
     // model: Option<Arc<Mutex<TradingModel>>>,
 }
@@ -90,20 +88,15 @@ impl Metrics {
 }
 
 impl Monitor {
-    pub fn new(
-        _config: MonitoringConfig, 
-        _bot: TradingBot, 
-        _model: Option<TradingModel>
-    ) -> Result<Self> {
-        let registry = Registry::new(); // Keep registry for Metrics init
+    pub fn new(registry: Arc<Registry>) -> Result<Self> {
         let metrics = Metrics::new(&registry)?;
         
         Ok(Self {
             // config, // Keep commented
-            // registry, // Keep commented
-            metrics, // Keep metrics
+            // registry, // Keep commented (Registry passed to Metrics)
+            metrics,
             // bot: Arc::new(Mutex::new(bot)), // Keep commented
-            // model: model.map(|m| Arc::new(Mutex::new(m))), // Keep commented
+            // model: model.map(|m| Arc::new(Mutex::new(m))), // Keep commented (or use Predictor)
         })
     }
 
@@ -188,10 +181,21 @@ mod tests {
     use super::*;
     use crate::config::{Config, ApiConfig, TradingConfig, MonitoringConfig, AlertThresholds, TelegramConfig, DatabaseConfig, SecurityConfig, MLConfig, SolanaConfig, DexTradingConfig};
     use crate::trading::TradingBot;
-    use crate::ml::{ModelArchitecture, LossFunction, Activation};
+    use crate::ml::{TradingModel, Predictor, ModelArchitecture, LossFunction, Activation};
     use crate::api::MarketDataCollector;
     use std::sync::Arc;
     use chrono::Utc;
+    use prometheus::Registry;
+    use tokio::sync::Mutex;
+    use crate::error::Error;
+
+    // Define DummyPredictor here as well
+    struct DummyPredictor;
+    impl Predictor for DummyPredictor {
+        fn predict(&mut self, _data: &crate::trading::TradingMarketData) -> Result<Vec<f64>> {
+            Ok(vec![0.5, 0.5]) // Always hold
+        }
+    }
 
     // Helper to create a default test config
     fn create_test_config() -> Config {
@@ -233,7 +237,6 @@ mod tests {
                 max_connections: 10,
             },
             security: SecurityConfig {
-                enable_2fa: false,
                 api_key_rotation_days: 30,
                 keychain_service_name: "test_keychain".to_string(),
                 solana_key_username: "test_sol_user".to_string(),
@@ -272,31 +275,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_monitor_creation() {
-        let config = create_test_config();
-        let config_arc = Arc::new(config);
-
-        let market_data_collector = Arc::new(MarketDataCollector::new(
-            config_arc.api.coingecko_api_key.clone(),
-            config_arc.api.coinmarketcap_api_key.clone(),
-            config_arc.api.cryptodatadownload_api_key.clone(),
-        ));
-        let bot = TradingBot::new(market_data_collector.clone(), config_arc.clone()).expect("Failed to create bot for test");
-        assert!(Monitor::new(config_arc.monitoring.clone(), bot, None).is_ok());
+        let registry = Arc::new(Registry::new());
+        let monitor = Monitor::new(registry);
+        assert!(monitor.is_ok());
     }
 
     #[tokio::test]
     async fn test_metrics_recording() {
-        let config = create_test_config();
-        let config_arc = Arc::new(config);
-
-        let market_data_collector = Arc::new(MarketDataCollector::new(
-            config_arc.api.coingecko_api_key.clone(),
-            config_arc.api.coinmarketcap_api_key.clone(),
-            config_arc.api.cryptodatadownload_api_key.clone(),
-        ));
-        let bot = TradingBot::new(market_data_collector.clone(), config_arc.clone()).expect("Failed to create bot for test");
-        let monitor = Monitor::new(config_arc.monitoring.clone(), bot, None).unwrap();
-
+        let registry = Arc::new(Registry::new());
+        let monitor = Monitor::new(registry).unwrap();
         // Test trade recording
         let trade = crate::trading::Trade {
             entry_time: Utc::now(),
@@ -310,5 +297,32 @@ mod tests {
         };
 
         assert!(monitor.record_trade(&trade).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_alerting() {
+        let config = create_test_config();
+        let config_arc = Arc::new(config);
+        
+        let market_data_collector = Arc::new(MarketDataCollector::new(
+            config_arc.api.coingecko_api_key.clone(),
+            config_arc.api.coinmarketcap_api_key.clone(),
+            config_arc.api.cryptodatadownload_api_key.clone(),
+        ));
+
+        // Create Dummy Predictor instance
+        let dummy_model: Arc<Mutex<dyn Predictor + Send>> = Arc::new(Mutex::new(DummyPredictor));
+
+        // Update TradingBot::new call
+        let bot = TradingBot::new(market_data_collector.clone(), dummy_model.clone(), config_arc.clone()).expect("Failed to create bot for test");
+        let bot_arc = Arc::new(Mutex::new(bot));
+        
+        let registry = Arc::new(Registry::new());
+        let monitor = Monitor::new(registry.clone());
+
+        assert!(monitor.is_ok());
+        let _monitor = monitor.unwrap();
+
+        // TODO: Add actual alert trigger simulation and assertions
     }
 } 

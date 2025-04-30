@@ -3,13 +3,6 @@ use ring::{aead, rand::SecureRandom};
 use ring::rand::SystemRandom;
 use std::path::Path;
 use log::info;
-use std::array::TryFromSliceError;
-
-impl From<TryFromSliceError> for Error {
-    fn from(err: TryFromSliceError) -> Self {
-        Error::SecurityError(format!("Slice conversion error: {}", err))
-    }
-}
 
 pub struct SecureStorage {
     key: aead::LessSafeKey,

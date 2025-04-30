@@ -8,13 +8,11 @@ mod api_key;
 mod input_validator;
 pub mod rate_limit;
 mod secure_storage;
-mod yubikey;
 
 pub use api_key::ApiKeyManager;
 pub use input_validator::InputValidator;
 pub use rate_limit::RateLimiter;
 pub use secure_storage::SecureStorage;
-pub use yubikey::YubikeyManager;
 
 #[derive(Debug, Clone, Default)]
 pub struct SecurityConfig {
@@ -26,7 +24,6 @@ pub struct SecurityConfig {
 
 pub struct SecurityManager {
     api_key_manager: Arc<Mutex<ApiKeyManager>>,
-    yubikey_manager: Arc<Mutex<YubikeyManager>>,
     rate_limiter: Arc<Mutex<RateLimiter>>,
     input_validator: Arc<Mutex<InputValidator>>,
     secure_storage: Arc<Mutex<SecureStorage>>,
@@ -36,7 +33,6 @@ impl SecurityManager {
     pub async fn new(config: SecurityConfig) -> Result<Self> {
         Ok(Self {
             api_key_manager: Arc::new(Mutex::new(ApiKeyManager::new(30).await?)),
-            yubikey_manager: Arc::new(Mutex::new(YubikeyManager::new()?)),
             rate_limiter: Arc::new(Mutex::new(RateLimiter::new(
                 config.rate_limit_requests,
                 Duration::from_secs(config.rate_limit_window_seconds),
@@ -53,10 +49,6 @@ impl SecurityManager {
     pub async fn check_rate_limit(&self, ip: &str) -> Result<bool> {
         let limiter = self.rate_limiter.lock().await;
         limiter.check(ip).await
-    }
-
-    pub async fn validate_yubikey_otp(&self, otp: &str) -> Result<bool> {
-        self.yubikey_manager.lock().await.validate_otp(otp).await
     }
 
     pub async fn encrypt_data(&self, data: &[u8]) -> Result<Vec<u8>> {

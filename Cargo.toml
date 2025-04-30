@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "A high-performance cryptocurrency trading bot with ML capabilities"
-build = "build.rs"
 
 [dependencies]
 # Async runtime
@@ -39,9 +38,8 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chron
 # Cryptography
 ring = "0.17"
 rust-crypto = "0.2"
-base64 = "0.21"
+base64 = "0.22"
 rand = "0.8"
-yubikey = "0.4"  # YubiKey hardware support
 
 # ML
 tch = { version = "0.20.0" }
@@ -79,6 +77,10 @@ spl-associated-token-account = "3.0.2" # For finding ATAs
 
 # Additional dependencies
 rpassword = "7.3" # Add for reading password securely
+bs58 = "0.5"
+bincode = "1.3"
+async-trait = "0.1.80"
+solana-program = "2.2.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
