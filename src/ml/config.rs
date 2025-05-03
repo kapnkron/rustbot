@@ -37,6 +37,7 @@ pub struct MLConfig {
 }
 
 impl MLConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         architecture: ModelArchitecture,
         loss_function: LossFunction,

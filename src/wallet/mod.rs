@@ -16,6 +16,12 @@ pub struct Wallet {
     balances: Arc<Mutex<HashMap<String, Balance>>>,
 }
 
+impl Default for Wallet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Wallet {
     pub fn new() -> Self {
         Self {

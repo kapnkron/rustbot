@@ -8,6 +8,7 @@ use teloxide::utils::command::BotCommands;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::error;
+use crate::api::MarketDataProvider;
 
 const RECENT_TRADES_LIMIT: usize = 5;
 
@@ -31,15 +32,15 @@ pub enum Command {
 }
 
 #[derive(Clone)]
-pub struct TelegramBot {
+pub struct TelegramBot<M: MarketDataProvider + Clone + Send + Sync + 'static> {
     bot: Bot,
     chat_id: ChatId,
-    trading_bot: Arc<TradingBot>,
+    trading_bot: Arc<TradingBot<M>>,
     dashboard: Arc<Mutex<Dashboard>>,
 }
 
-impl TelegramBot {
-    pub fn new(bot_token: String, chat_id: String, trading_bot: Arc<TradingBot>, dashboard: Dashboard) -> Self {
+impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
+    pub fn new(bot_token: String, chat_id: String, trading_bot: Arc<TradingBot<M>>, dashboard: Dashboard) -> Self {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
@@ -49,22 +50,16 @@ impl TelegramBot {
     }
 
     pub async fn start(&self) -> Result<()> {
+        let _chat_id = self.chat_id;
+        let _trading_bot = self.trading_bot.clone();
+        let _dashboard = self.dashboard.clone();
         let bot = self.bot.clone();
-        let chat_id = self.chat_id;
-        let trading_bot = self.trading_bot.clone();
-        let dashboard = self.dashboard.clone();
+
+        let telegram_bot_clone = self.clone();
 
         Command::repl(bot, move |bot: Bot, msg: Message, cmd: Command| {
-            let chat_id = chat_id;
-            let trading_bot = trading_bot.clone();
-            let dashboard = dashboard.clone();
-            let telegram_bot = TelegramBot {
-                bot,
-                chat_id,
-                trading_bot,
-                dashboard,
-            };
-
+            let _bot = bot;
+            let telegram_bot = telegram_bot_clone.clone();
             async move {
                 if let Err(e) = telegram_bot.handle_command(msg, cmd).await {
                     error!("Error handling command: {}", e);
@@ -236,7 +231,7 @@ impl TelegramBot {
             }
             Command::MarketData => {
                 let trading_bot = self.trading_bot.clone();
-                if let Ok(data) = trading_bot.get_market_data(&String::new()).await {
+                if let Ok(data) = trading_bot.get_market_data("").await {
                     let message = format!(
                         "📊 *Market Data*\n\n\
                         Price: ${:.2}\n\

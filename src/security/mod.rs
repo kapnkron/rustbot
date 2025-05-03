@@ -67,18 +67,31 @@ impl SecurityManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn test_security_manager() -> Result<()> {
-        let config = SecurityConfig::default();
+        // Provide a permissive config for testing
+        let test_key_path = "./test_encryption_key.key";
+        let config = SecurityConfig {
+            max_input_length: 1024,
+            rate_limit_requests: 10, // Allow some requests
+            rate_limit_window_seconds: 1, // Short window
+            encryption_key_path: test_key_path.to_string(),
+        };
+        // Ensure the dummy key file exists for SecureStorage::new
+        if !PathBuf::from(test_key_path).exists() {
+            std::fs::write(test_key_path, "testkey123456789012345678901234")?;
+        }
+        
         let manager = SecurityManager::new(config).await?;
         
         // Test API key validation
         let key = manager.api_key_manager.lock().await.generate_key("test_user").await?;
         assert!(manager.validate_api_key(&key).await?);
         
-        // Test rate limiting
-        assert!(manager.check_rate_limit("127.0.0.1").await?);
+        // Test rate limiting - should pass now
+        assert!(manager.check_rate_limit("127.0.0.1").await?, "First rate limit check failed");
         
         // Test input validation
         assert!(manager.validate_input("valid input").await?);
@@ -88,6 +101,9 @@ mod tests {
         let encrypted = manager.encrypt_data(data).await?;
         let decrypted = manager.decrypt_data(&encrypted).await?;
         assert_eq!(data, &decrypted[..]);
+
+        // Clean up dummy key file
+        std::fs::remove_file(test_key_path)?;
         
         Ok(())
     }

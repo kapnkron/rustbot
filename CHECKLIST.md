@@ -17,29 +17,29 @@
   // - [ ] Set proper permissions // Removed
 
 ## 2. Code Cleanup
-- [ ] Remove unused imports
+- [x] Remove unused imports
   - [x] Clean up src/trading/mod.rs // Compiler confirms no unused imports
-  - [x] Clean up src/trading/backtest.rs // Compiler confirms no unused imports
+  - [x] Clean up src/trading/backtest.rs // Completed via cargo fix
   - [x] Clean up src/ml/mod.rs // Compiler confirms no unused imports
-  - [ ] Clean up src/ml/evaluation.rs
-  - [ ] Clean up src/monitoring/mod.rs
-  - [ ] Clean up src/security/mod.rs // YubiKey parts removed
-  - [ ] Clean up src/telegram/mod.rs
-  - [ ] Clean up src/wallet/mod.rs
-  - [ ] Clean up src/services/mod.rs
-- [ ] Fix unused variables
-  - [ ] Add underscore prefix to intentionally unused variables
-  - [ ] Remove truly unused variables
-- [ ] Fix visibility issues
+  - [x] Clean up src/ml/evaluation.rs // Checked via cargo check --all-targets
+  - [x] Clean up src/monitoring/mod.rs // Completed via cargo fix
+  - [x] Clean up src/security/mod.rs // Checked via cargo check --all-targets
+  - [x] Clean up src/telegram/mod.rs // Checked via cargo check --all-targets
+  - [x] Clean up src/wallet/mod.rs // Checked via cargo check --all-targets
+  - [x] Clean up src/services/mod.rs // Checked via cargo check --all-targets
+- [x] Fix unused variables
+  - [x] Add underscore prefix to intentionally unused variables // Addressed during clippy/check fixes
+  - [x] Remove truly unused variables // Addressed during clippy/check fixes
+- [x] Fix visibility issues
   - [x] Update struct visibility in src/api/coingecko.rs // Completed
   - [x] Update struct visibility in src/api/coinmarketcap.rs // Completed
   - [x] Update struct visibility in src/security/api_key.rs // Completed
 
 ## 3. Testing Infrastructure
-- [ ] Set up proper test environment
-  - [ ] Configure tokio-test
-  - [ ] Set up test fixtures
-  - [ ] Add test utilities
+- [x] Set up proper test environment
+  - [x] Configure tokio-test
+  - [/] Set up test fixtures // (In progress - model files, config)
+  - [/] Add test utilities // (In progress - common module created)
 - [ ] Implement test coverage
   - [ ] Add unit tests for core components
   - [ ] Add integration tests
@@ -121,11 +121,12 @@
 - [x] Remove YubiKey integration code (src/security/yubikey.rs, config, SecurityManager references).
 
 ## Progress Tracking
-- Current Focus: Code Cleanup
-- Next Up: Testing Infrastructure
+- Current Focus: Testing Infrastructure
+- Next Up: High Priority / Blocking Tasks
 - Completed Items:
   - Fixed type mismatch in main.rs
   - Fixed tokio macro build issue
+  - Completed Code Cleanup section (Imports, Variables, Visibility)
 
 ## Notes
 - Priority order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10

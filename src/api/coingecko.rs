@@ -301,7 +301,7 @@ impl CoinGeckoClient {
     }
 
     pub async fn get_market_data(&self, symbol: &str) -> Result<CommonMarketData> {
-        let response = self.client.get(&format!("{}/coins/{}", self.base_url, symbol))
+        let response = self.client.get(format!("{}/coins/{}", self.base_url, symbol))
             .send()
             .await?;
 

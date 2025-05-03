@@ -59,7 +59,7 @@ impl TradingModel {
             model,
             device,
             var_store,
-            preprocessor: DataPreprocessor::new(config_clone.window_size, config_clone.window_size)?,
+            preprocessor: DataPreprocessor::new(config_clone.min_data_points)?,
             evaluator: Arc::new(Mutex::new(ModelEvaluator::new(config_clone.window_size))),
             version_manager: Arc::new(Mutex::new(ModelVersionManager::new(&config_clone.model_path)?)),
         })
@@ -84,9 +84,10 @@ impl TradingModel {
             )).into());
         }
 
-        let mut features = Vec::with_capacity(window.len());
-        for data in window {
-            let feature_vec = self.preprocessor.process_market_data(data)?;
+        let mut features = Vec::with_capacity(window.len() * 11); // Estimate size
+        // Use iterator instead of range loop
+        for data_point in window.iter().take(self.config.window_size) {
+            let feature_vec = self.preprocessor.process_market_data(data_point)?;
             features.extend(feature_vec);
         }
         Ok(features)
@@ -121,11 +122,11 @@ impl TradingModel {
         let label_size = labels[0].len() as i64;
 
         let input = Tensor::f_from_slice(&features.concat())?
-            .reshape(&[batch_size, feature_size])
+            .reshape([batch_size, feature_size])
             .to(self.device);
         
         let target = Tensor::f_from_slice(&labels.concat())?
-            .reshape(&[batch_size, label_size])
+            .reshape([batch_size, label_size])
             .to(self.device);
         
         let output = self.model.forward(&input);
@@ -135,7 +136,7 @@ impl TradingModel {
         };
         
         loss.backward();
-        Ok(loss.double_value(&[]) as f64)
+        Ok(loss.double_value(&[]))
     }
 
     pub fn train_epoch(&mut self, features: &[Vec<f64>], labels: &[Vec<f64>], batch_size: usize) -> Result<f64> {
@@ -206,8 +207,9 @@ impl TradingModel {
         
         for window in data.windows(self.config.window_size + 1) {
             let mut window_features = Vec::new();
-            for i in 0..self.config.window_size {
-                let feature_vec = self.preprocessor.process_market_data(&window[i])?;
+            // Use iterator instead of range loop
+            for data_point in window.iter().take(self.config.window_size) {
+                let feature_vec = self.preprocessor.process_market_data(data_point)?;
                 window_features.extend(feature_vec);
             }
             features.extend(window_features);
@@ -231,9 +233,8 @@ impl Predictor for TradingModel {
     async fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
         let features_f64 = self.preprocessor.process_market_data(data)?;
 
-        // Ensure we have the expected number of features
-        let expected_input_size = self.config.architecture.input_size; // Get from config
-        if features_f64.len() as i64 != expected_input_size { // Compare as i64
+        let expected_input_size = self.config.architecture.input_size;
+        if features_f64.len() as i64 != expected_input_size { 
             return Err(Error::MLError(format!(
                 "Preprocessor returned unexpected feature count: expected {}, got {}",
                 expected_input_size,
@@ -241,20 +242,28 @@ impl Predictor for TradingModel {
             )));
         }
 
-        let input = Tensor::f_from_slice(&features_f64)?
-            .reshape(&[1, expected_input_size]) // Reshape for batch size 1 (already i64)
-            .to(self.device);
+        // Convert features to f32 for the model
+        let features_f32: Vec<f32> = features_f64.iter().map(|&x| x as f32).collect();
 
-        // Perform inference within a no_grad block
+        // Create input tensor as Float
+        let input = Tensor::f_from_slice(&features_f32)? 
+            .reshape([1, expected_input_size]) 
+            .to(self.device)
+            .to_kind(tch::Kind::Float); // Explicitly ensure Float type
+
         let output = tch::no_grad(|| self.model.forward_t(&input, false));
 
-        // Convert output tensor to Vec<f64>
-        let output_vec: Vec<f64> = Vec::<f64>::try_from(output)?;
+        // --- Apply Softmax to get probabilities --- 
+        let probabilities = output.softmax(-1, None); // Apply softmax along the last dimension
 
-        // Record the prediction - Uncommented
-        let mut evaluator = self.evaluator.lock().await; // Use await here
+        // Convert probabilities tensor back to Vec<f64>
+        let probabilities_f64 = probabilities.to_kind(tch::Kind::Double);
+        let flattened_probs = probabilities_f64.flatten(0, -1); 
+        let output_vec: Vec<f64> = Vec::<f64>::try_from(flattened_probs)?;
+
+        let mut evaluator = self.evaluator.lock().await;
         // Assuming predict returns probabilities for [Buy, Sell]
-        let buy_prob = output_vec.get(0).cloned().unwrap_or(0.0); // Assuming index 0 is buy prob
+        let buy_prob = output_vec.first().cloned().unwrap_or(0.0); // Assuming index 0 is buy prob
         let sell_prob = output_vec.get(1).cloned().unwrap_or(0.0); // Assuming index 1 is sell prob
 
         evaluator.record_prediction(data.timestamp, buy_prob, sell_prob); // Pass both probabilities
@@ -266,200 +275,179 @@ impl Predictor for TradingModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::common::{create_test_model_config, create_test_trading_market_data};
+    use tempfile::tempdir;
+    use std::collections::HashMap;
+    use crate::error::Error;
+    use super::MLConfigError;
     use chrono::Utc;
 
-    fn create_test_market_data(price: f64, volume: f64, market_cap: f64) -> TradingMarketData {
-        TradingMarketData {
-            symbol: "BTC".to_string(),
-            price,
-            volume,
-            market_cap,
-            price_change_24h: 0.0,
-            volume_change_24h: 0.0,
+    fn create_test_model_config_for_ml() -> ModelConfig {
+        let mut config = create_test_model_config();
+        config.min_data_points = 26;
+        config
+    }
+
+    #[test]
+    fn test_data_preprocessor_process_market_data() -> Result<()> {
+        let config = create_test_model_config_for_ml();
+        let mut preprocessor = DataPreprocessor::new(config.min_data_points)?;
+        // Feed history first (now loops 26 times)
+        for i in 0..config.min_data_points {
+            let history_data = create_test_trading_market_data("BTC/USD", 50000.0 + i as f64);
+            let _ = preprocessor.process_market_data(&history_data);
+        }
+        // Now process the final data point
+        let final_data = create_test_trading_market_data("BTC/USD", 50000.0 + config.min_data_points as f64);
+        let result = preprocessor.process_market_data(&final_data);
+        assert!(result.is_ok(), "process_market_data failed: {:?}", result.err());
+        let features = result.unwrap();
+        assert_eq!(features.len(), 11);
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_window_incorrect_size() -> Result<()> {
+        let config = create_test_model_config_for_ml();
+        let mut preprocessor = DataPreprocessor::new(config.min_data_points)?;
+        // Needs enough history for the final call to process_market_data to succeed
+        for i in 0..(config.min_data_points -1) { // Feed 25 points
+             let history_data = create_test_trading_market_data("BTC/USD", 50000.0 + i as f64);
+             let _ = preprocessor.process_market_data(&history_data);
+        }
+        // Now call with the 26th point, should fail inside (e.g. MACD needs 26)
+        // but the main check is for the outer insufficient points error?
+        // Let's rethink this test. It was originally checking process_window, which doesn't exist.
+        // Let's test that process_market_data fails correctly if called *before* min_data_points is reached.
+        let mut preprocessor_short = DataPreprocessor::new(config.min_data_points)?;
+        let data = create_test_trading_market_data("BTC/USD", 50004.0);
+        for _ in 0..5 { // Feed only 5 points
+             let _ = preprocessor_short.process_market_data(&data); // Ignore result
+        }
+        let final_result = preprocessor_short.process_market_data(&data); // Call again
+        assert!(final_result.is_err()); // Expect error: Insufficient data points
+        if let Err(Error::MLConfigError(MLConfigError::InvalidConfig(msg))) = final_result {
+            assert!(msg.contains("Insufficient data points"));
+        } else {
+            panic!("Expected Insufficient data points error, got {:?}", final_result);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_process_window_correct_size() -> Result<()> {
+        let config = create_test_model_config_for_ml();
+        let mut preprocessor = DataPreprocessor::new(config.min_data_points)?;
+        // Feed history first (now loops 26 times)
+        for i in 0..config.min_data_points {
+            let history_data = create_test_trading_market_data("BTC/USD", 50000.0 + i as f64);
+            let _ = preprocessor.process_market_data(&history_data); 
+        }
+        // Now process the last point again, history should be sufficient for all indicators
+        let final_data = create_test_trading_market_data("BTC/USD", 50000.0 + config.min_data_points as f64);
+        let result = preprocessor.process_market_data(&final_data); 
+        assert!(result.is_ok(), "Processing failed: {:?}", result.err());
+        let features = result.unwrap();
+        assert_eq!(features.len(), 11);
+        Ok(())
+    }
+
+    #[test]
+    fn test_trading_model_new() -> Result<()> {
+        let config = create_test_model_config_for_ml();
+        let model = TradingModel::new(config)?;
+        // Compare device directly
+        assert_eq!(model.device, tch::Device::Cpu); // Assuming CPU for tests
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_trading_model_predict() -> Result<()> {
+        let config = create_test_model_config_for_ml();
+        let mut model = TradingModel::new(config)?;
+        // Feed required history (now 26 points)
+        for i in 0..model.config.min_data_points {
+            let history_data = create_test_trading_market_data("BTC/USD", 50000.0 + i as f64);
+            let _ = model.process_data(&history_data); // Feed the preprocessor
+        }
+        
+        // Now predict with a new data point
+        let market_data = create_test_trading_market_data("BTC/USD", 50000.0 + model.config.min_data_points as f64);
+        let prediction = model.predict(&market_data).await;
+        assert!(prediction.is_ok(), "Prediction failed: {:?}", prediction.err());
+        let probs = prediction.unwrap();
+        assert_eq!(probs.len(), 2);
+        assert!(probs[0] >= 0.0 && probs[0] <= 1.0);
+        assert!(probs[1] >= 0.0 && probs[1] <= 1.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_trading_model_load_save() -> Result<()> {
+        let config = create_test_model_config();
+        let model = TradingModel::new(config)?;
+        let dir = tempdir()?;
+        let path = dir.path().join("test_model.ot");
+        model.save(&path)?;
+        let mut new_model = TradingModel::new(create_test_model_config())?;
+        new_model.load(&path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_model_evaluator() -> Result<()> {
+        let mut evaluator = ModelEvaluator::new(5);
+        let now = Utc::now();
+
+        evaluator.record_prediction(now - chrono::Duration::seconds(4), 0.7, 0.3);
+        evaluator.record_actual_move(now - chrono::Duration::seconds(4), 100.0);
+
+        evaluator.record_prediction(now - chrono::Duration::seconds(3), 0.2, 0.8);
+        evaluator.record_actual_move(now - chrono::Duration::seconds(3), -50.0);
+
+        evaluator.update_metrics()?;
+        let metrics = evaluator.get_metrics();
+        assert!(metrics.mse >= 0.0);
+        assert!(metrics.mae >= 0.0);
+        assert!(metrics.rmse >= 0.0);
+        // let cm = evaluator.get_confusion_matrix(); // Commented out
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_model_version_manager() -> Result<()> {
+        let dir = tempdir()?;
+        let base_path_str = dir.path().to_str().expect("Temp path is not valid UTF-8");
+        let mut manager = ModelVersionManager::new(base_path_str)?;
+
+        let mut metrics1 = HashMap::new();
+        metrics1.insert("mse".to_string(), 0.1);
+        let version1 = ModelVersion {
+            version: "1.0.0".to_string(),
             timestamp: Utc::now(),
-            volume_24h: volume,
-            change_24h: 0.0,
-            quote: crate::api::types::Quote {
-                usd: crate::api::types::USDData {
-                    price,
-                    volume_24h: volume,
-                    market_cap,
-                    percent_change_24h: 0.0,
-                    volume_change_24h: 0.0,
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_model_creation() {
-        let config = ModelConfig {
-            architecture: ModelArchitecture {
-                input_size: 9,
-                hidden_size: 20,
-                output_size: 2,
-                num_layers: 2,
-                dropout: Some(0.1),
-                activation: Activation::ReLU,
-            },
-            loss_function: LossFunction::MSE,
-            learning_rate: 0.001,
-            model_path: "model.pt".to_string(),
-            window_size: 10,
-            min_data_points: 100,
+            metrics: metrics1.clone(),
+            input_size: 10, hidden_size: 5, output_size: 2, learning_rate: 0.001, window_size: 5
         };
-        
-        assert!(TradingModel::new(config).is_ok());
-    }
+        manager.add_version(version1)?;
 
-    #[test]
-    fn test_prediction() {
-        let config = ModelConfig {
-            architecture: ModelArchitecture {
-                input_size: 11,
-                hidden_size: 20,
-                output_size: 2,
-                num_layers: 2,
-                dropout: Some(0.1),
-                activation: Activation::ReLU,
-            },
-            loss_function: LossFunction::MSE,
-            learning_rate: 0.001,
-            model_path: "model.pt".to_string(),
-            window_size: 26,
-            min_data_points: 100,
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let mut metrics2 = HashMap::new();
+        metrics2.insert("mse".to_string(), 0.05);
+        let version2 = ModelVersion {
+            version: "1.1.0".to_string(),
+            timestamp: Utc::now(),
+            metrics: metrics2.clone(),
+             input_size: 10, hidden_size: 5, output_size: 2, learning_rate: 0.001, window_size: 5
         };
-        
-        let mut model = TradingModel::new(config.clone()).unwrap();
+        manager.add_version(version2)?;
 
-        for i in 0..config.window_size {
-            let data = create_test_market_data(
-                100.0 + i as f64,
-                1000.0 + (i * 10) as f64,
-                1_000_000_000.0 + (i * 1_000_000) as f64,
-            );
-            let _ = model.process_data(&data);
-        }
-
-        let final_data = create_test_market_data(
-            100.0 + config.window_size as f64,
-            1000.0 + (config.window_size * 10) as f64,
-            1_000_000_000.0 + (config.window_size * 1_000_000) as f64,
-        );
-        
-        let prediction = model.predict(&final_data).unwrap();
-        assert_eq!(prediction.len(), config.architecture.output_size as usize);
-    }
-
-    #[tokio::test]
-    async fn test_model_evaluation_integration() {
-        let config = ModelConfig {
-            architecture: ModelArchitecture {
-                input_size: 11,
-                hidden_size: 32,
-                output_size: 2,
-                num_layers: 2,
-                dropout: Some(0.1),
-                activation: Activation::ReLU,
-            },
-            loss_function: LossFunction::MSE,
-            learning_rate: 0.001,
-            model_path: "test_model.pt".to_string(),
-            window_size: 26,
-            min_data_points: 100,
-        };
-
-        let mut model = TradingModel::new(config.clone()).unwrap();
-        
-        // Prime the preprocessor
-        let mut _last_timestamp = Utc::now(); // Prefix with underscore
-        for i in 0..config.window_size {
-             let data = create_test_market_data(
-                50000.0 + i as f64,
-                1000.0 + (i * 10) as f64,
-                1_000_000_000.0 + (i * 1_000_000) as f64,
-            );
-            _last_timestamp = data.timestamp; // Prefix with underscore
-            let _ = model.process_data(&data);
-        }
-
-        // Process the data point we'll use for prediction/evaluation
-         let market_data = create_test_market_data(
-            50000.0 + config.window_size as f64,
-            1000.0 + (config.window_size * 10) as f64,
-            1_000_000_000.0 + (config.window_size * 1_000_000) as f64,
-        );
-        let final_timestamp = market_data.timestamp; // Use a different variable name for the actually used timestamp
-
-        // Predict should now work
-        let prediction = model.predict(&market_data).unwrap();
-        assert_eq!(prediction.len(), config.architecture.output_size as usize);
-        
-        // Record actual move using the timestamp of the predicted data
-        model.record_actual_move(final_timestamp, 0.02).await.unwrap();
-        
-        // Get metrics and await the Future
-        let metrics = model.get_metrics_map().await;
-        assert!(metrics.contains_key("mse"));
-        assert!(metrics.contains_key("mae"));
-        assert!(metrics.contains_key("rmse"));
-    }
-
-    #[tokio::test]
-    async fn test_model_versioning_integration() -> Result<()> {
-        let config = ModelConfig {
-            architecture: ModelArchitecture {
-                input_size: 11,
-                hidden_size: 32,
-                output_size: 2,
-                num_layers: 2,
-                dropout: Some(0.1),
-                activation: Activation::ReLU,
-            },
-            loss_function: LossFunction::MSE,
-            learning_rate: 0.001,
-            model_path: "test_model_versioning.pt".to_string(),
-            window_size: 26,
-            min_data_points: 100,
-        };
-
-        let mut model = TradingModel::new(config.clone())?;
-        
-        // Prime the preprocessor
-        let mut _last_timestamp = Utc::now(); // Prefix with underscore
-        for i in 0..config.window_size {
-             let data = create_test_market_data(
-                50000.0 + i as f64,
-                1000.0 + (i * 10) as f64,
-                1_000_000_000.0 + (i * 1_000_000) as f64,
-            );
-            _last_timestamp = data.timestamp; // Prefix with underscore
-            let _ = model.process_data(&data);
-        }
-
-        // Process the data point we'll use for prediction/evaluation
-         let market_data = create_test_market_data(
-            50000.0 + config.window_size as f64,
-            1000.0 + (config.window_size * 10) as f64,
-            1_000_000_000.0 + (config.window_size * 1_000_000) as f64,
-        );
-        let final_timestamp = market_data.timestamp; // Use a different variable name
-
-        // Predict should now work
-        let _prediction = model.predict(&market_data)?;
-        // Record an actual move to generate some metrics
-        model.record_actual_move(final_timestamp, 0.02).await?;
-        
-        // Save version
-        model.save_version().await?;
-        
-        let version_info = model.get_version_info("1.0.0").await;
-        assert!(version_info.is_some());
-        let version_info = version_info.unwrap();
-        assert_eq!(version_info.version, "1.0.0");
-        assert!(version_info.metrics.contains_key("mse"));
-        assert!(version_info.metrics.contains_key("mae"));
-        assert!(version_info.metrics.contains_key("rmse"));
+        assert!(manager.get_version("1.0.0").is_some());
+        assert_eq!(manager.get_version("1.1.0").unwrap().metrics["mse"], 0.05);
+        let comparison = manager.compare_versions("1.0.0", "1.1.0")?;
+        assert_eq!(comparison.get("mse"), Some(&-0.05), "Comparison difference mismatch");
+        assert!(manager.get_version("invalid").is_none());
+        assert!(manager.compare_versions("1.0.0", "invalid").is_err());
 
         Ok(())
     }

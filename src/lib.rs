@@ -18,4 +18,8 @@ pub mod services;
 pub mod solana;
 pub mod cli;
 
-pub use error::{Error, Result}; 
+pub use error::{Error, Result};
+
+// Declare tests module only when testing
+#[cfg(test)]
+pub mod tests; 

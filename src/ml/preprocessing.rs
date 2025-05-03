@@ -5,40 +5,36 @@ use std::collections::VecDeque;
 
 #[derive(Debug)]
 pub struct DataPreprocessor {
-    window_size: usize,
     price_history: VecDeque<f64>,
     volume_history: VecDeque<f64>,
     min_data_points: usize,
 }
 
 impl DataPreprocessor {
-    pub fn new(window_size: usize, min_data_points: usize) -> Result<Self> {
-        if window_size < 2 {
-            return Err(MLConfigError::InvalidConfig("Window size must be at least 2".to_string()).into());
-        }
-        if min_data_points < window_size {
-            return Err(MLConfigError::InvalidConfig("Minimum data points must be at least window size".to_string()).into());
+    pub fn new(min_data_points: usize) -> Result<Self> {
+        if min_data_points < 26 {
+            return Err(MLConfigError::InvalidConfig(format!(
+                "Minimum data points must be at least 26 for MACD, got {}",
+                min_data_points
+            )).into());
         }
 
         Ok(Self {
-            window_size,
-            price_history: VecDeque::with_capacity(window_size),
-            volume_history: VecDeque::with_capacity(window_size),
+            price_history: VecDeque::with_capacity(min_data_points),
+            volume_history: VecDeque::with_capacity(min_data_points),
             min_data_points,
         })
     }
 
     pub fn process_market_data(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> {
-        // Update history
         self.price_history.push_back(data.price);
         self.volume_history.push_back(data.volume);
         
-        if self.price_history.len() > self.window_size {
+        if self.price_history.len() > self.min_data_points {
             self.price_history.pop_front();
             self.volume_history.pop_front();
         }
 
-        // Check if we have enough data
         if self.price_history.len() < self.min_data_points {
             return Err(MLConfigError::InvalidConfig(format!(
                 "Insufficient data points: got {}, required {}",
@@ -47,7 +43,6 @@ impl DataPreprocessor {
             )).into());
         }
 
-        // Calculate technical indicators
         let rsi = self.calculate_rsi()?;
         let sma = self.calculate_sma()?;
         let ema = self.calculate_ema()?;
@@ -55,12 +50,10 @@ impl DataPreprocessor {
         let price_volatility = self.calculate_price_volatility()?;
         let macd = self.calculate_macd()?;
 
-        // Normalize features
         let normalized_price = self.normalize_price(data.price)?;
         let normalized_volume = self.normalize_volume(data.volume)?;
         let normalized_market_cap = self.normalize_market_cap(data.market_cap)?;
 
-        // Combine all features
         Ok(vec![
             normalized_price,
             normalized_volume,
@@ -207,7 +200,7 @@ impl DataPreprocessor {
     fn normalize_market_cap(&self, market_cap: f64) -> Result<f64> {
         // Log normalization with clipping to avoid extreme values
         let normalized = (market_cap.ln() - 20.0) / 10.0;
-        Ok(normalized.max(0.0).min(1.0))
+        Ok(normalized.clamp(0.0, 1.0))
     }
 }
 
@@ -241,34 +234,28 @@ mod tests {
 
     #[test]
     fn test_preprocessing() -> Result<()> {
-        // Ensure min_data_points >= window_size and >= MACD requirement (26)
-        let window_size = 26;
         let min_data_points = 26; 
-        let mut preprocessor = DataPreprocessor::new(window_size, min_data_points)?;
+        let mut preprocessor = DataPreprocessor::new(min_data_points)?;
         
-        // Add enough data points to meet min_data_points requirement (and MACD)
         for i in 0..min_data_points {
             let price = 100.0 + (i as f64);
             let volume = 1000.0 + (i as f64 * 10.0);
             let market_cap = 1_000_000_000.0 + (i as f64 * 1_000_000.0);
             let data = create_test_market_data(price, volume, market_cap);
-            // Ignore errors until the last point is added
             if i < min_data_points - 1 {
                  let _ = preprocessor.process_market_data(&data);
             } else {
-                // On the last iteration, expect Ok and get features
                 let features = preprocessor.process_market_data(&data)?;
                 assert_eq!(features.len(), 11, "Should have 11 features");
             }
         }
         
-        // Now that we have enough data, test RSI and normalization
         let rsi = preprocessor.calculate_rsi()?;
         assert!(rsi > 50.0, "RSI should indicate upward trend"); 
         
         let last_price = 100.0 + ((min_data_points - 1) as f64);
         let normalized_price = preprocessor.normalize_price(last_price)?;
-        assert!(normalized_price >= 0.0 && normalized_price <= 1.0, "Normalized price out of bounds");
+        assert!((0.0..=1.0).contains(&normalized_price), "Normalized price out of bounds");
         assert!((normalized_price - 1.0).abs() < f64::EPSILON, "Last price should normalize to 1.0");
 
         Ok(())

@@ -286,7 +286,7 @@ impl CoinMarketCapClient {
             return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
-            )).into());
+            )));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -310,7 +310,7 @@ impl CoinMarketCapClient {
             return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
-            )).into());
+            )));
         }
 
         let data: serde_json::Value = response.json().await?;
@@ -347,7 +347,7 @@ impl CoinMarketCapClient {
             return Err(Error::ApiError(format!(
                 "CoinMarketCap API error: {}",
                 response.status()
-            )).into());
+            )));
         }
 
         let data: CoinMarketCapResponse = response.json().await?;
@@ -355,7 +355,7 @@ impl CoinMarketCapClient {
         if data.data.is_empty() {
             return Err(Error::ApiError(
                 "No data returned from CoinMarketCap API".to_string()
-            ).into());
+            ));
         }
 
         let usd_data = &data.data[0].quote.usd;

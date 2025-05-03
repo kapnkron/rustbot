@@ -18,6 +18,12 @@ pub struct ModelMetrics {
     pub rmse: f64,
 }
 
+impl Default for ModelMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModelMetrics {
     pub fn new() -> Self {
         Self {

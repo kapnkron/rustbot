@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
         Ok(cfg) => Arc::new(cfg),
         Err(e) => {
             eprintln!("Failed to load configuration from {:?}: {}", config_path, e);
-            return Err(anyhow::anyhow!("Configuration loading failed: {}", e).into());
+            return Err(anyhow::anyhow!("Configuration loading failed: {}", e));
         }
     };
     info!("Configuration loaded successfully.");
@@ -56,44 +56,73 @@ async fn main() -> Result<()> {
     let model_predictor: Arc<Mutex<dyn Predictor + Send>> = Arc::new(Mutex::new(trading_model));
     info!("Trading model initialized.");
 
+    // Wrap the collector in Arc<Mutex<M>>
+    let collector_mutex = Arc::new(Mutex::new(market_data_collector.as_ref().clone()));
+
     // Pass the model instance to TradingBot::new
-    let trading_bot = Arc::new(TradingBot::new(market_data_collector.clone(), model_predictor, config.clone())?);
+    let trading_bot = Arc::new(TradingBot::new(collector_mutex, model_predictor, config.clone())?);
+    let bot_clone = trading_bot.clone();
     info!("Trading bot initialized.");
 
-    let telegram_bot = if config.telegram.enable_notifications {
-        // Manually create a default ThresholdConfig
-        let default_thresholds = ThresholdConfig {
-            system_thresholds: SystemThresholds {
-                cpu_usage: 90.0, memory_usage: 90.0, disk_usage: 95.0, error_rate: 10.0,
-                api_timeout: Duration::from_secs(15), db_timeout: Duration::from_secs(5),
-            },
-            performance_thresholds: PerformanceThresholds {
-                api_error_rate: 5.0, db_error_rate: 5.0,
-                api_response_time: Duration::from_secs(2), db_query_time: Duration::from_secs(1),
-                ml_inference_time: Duration::from_millis(500),
-            },
-            trade_thresholds: TradeThresholds {
-                win_rate: 0.4, max_drawdown: 0.25, max_position_size: 10000.0, // Example values
-                min_profit_per_trade: 0.0, max_loss_per_trade: 500.0, daily_loss_limit: 1000.0,
-            },
-            notification_settings: NotificationSettings {
-                alert_cooldown: Duration::from_secs(300), max_alerts_per_hour: 10,
-                alert_priority: HashMap::new(), // Empty priorities for default
-            },
-        };
-        let dashboard = Dashboard::new(default_thresholds, Duration::from_secs(60));
-        
-        Some(TelegramBot::new(
-            config.telegram.bot_token.clone(), 
-            config.telegram.chat_id.clone(), 
-            trading_bot.clone(),
-            dashboard 
-        ))
-    } else {
-        None
+    // Construct default ThresholdConfig
+    let default_threshold_config = ThresholdConfig {
+        system_thresholds: SystemThresholds {
+            cpu_usage: 90.0,
+            memory_usage: 90.0,
+            disk_usage: 95.0,
+            error_rate: 10.0,
+            api_timeout: Duration::from_secs(15),
+            db_timeout: Duration::from_secs(5),
+        },
+        performance_thresholds: PerformanceThresholds {
+            api_error_rate: 5.0,
+            db_error_rate: 5.0,
+            api_response_time: Duration::from_secs(2),
+            db_query_time: Duration::from_secs(1),
+            ml_inference_time: Duration::from_millis(500),
+        },
+        trade_thresholds: TradeThresholds {
+            win_rate: 0.4, // 40%
+            max_drawdown: 0.25, // 25%
+            max_position_size: 10000.0,
+            min_profit_per_trade: 0.0,
+            max_loss_per_trade: 500.0,
+            daily_loss_limit: 1000.0,
+        },
+        notification_settings: NotificationSettings {
+            alert_cooldown: Duration::from_secs(300),
+            max_alerts_per_hour: 10,
+            alert_priority: HashMap::new(), // Empty priorities map
+        },
     };
-    if telegram_bot.is_some() {
-        info!("Telegram bot initialized.");
+
+    // Define update interval
+    let dashboard_update_interval = Duration::from_secs(60);
+
+    // Pass ThresholdConfig and interval to Dashboard::new
+    let dashboard = Dashboard::new(default_threshold_config, dashboard_update_interval);
+    let dashboard_arc = Arc::new(Mutex::new(dashboard));
+
+    // Declare telegram_bot outside the if block
+    let mut telegram_bot: Option<TelegramBot<_>> = None;
+
+    if config.telegram.enable_notifications {
+        // Assign Some inside the if block
+        telegram_bot = Some(TelegramBot::new(
+            config.telegram.bot_token.clone(),
+            config.telegram.chat_id.clone(),
+            trading_bot.clone(),
+            dashboard_arc.lock().await.clone(),
+        ));
+
+        // Clone the Option<TelegramBot> for the background task
+        if let Some(tg_bot_clone) = telegram_bot.clone() {
+            tokio::spawn(async move {
+                if let Err(e) = tg_bot_clone.start().await {
+                    error!("Telegram bot error: {}", e);
+                }
+            });
+        }
     }
 
     // Initialize Monitor (assuming Monitor::new signature is fixed)
@@ -111,8 +140,8 @@ async fn main() -> Result<()> {
     let mut interval = interval(Duration::from_secs(60)); // Example: Check every 60 seconds
     info!("Starting main trading loop...");
 
-    // Enable trading initially (or based on config/command line)
-    trading_bot.enable_trading(true).await;
+    // Use bot_clone here
+    bot_clone.enable_trading(true).await;
 
     loop {
         interval.tick().await;
@@ -122,20 +151,28 @@ async fn main() -> Result<()> {
         for symbol in &config.trading.trading_pairs { // Loop through config.trading.trading_pairs
             info!("Processing pair: {}", symbol);
             // Fetch market data for configured pairs
-            match trading_bot.get_market_data(symbol).await {
+            match bot_clone.get_market_data(symbol).await {
                 Ok(market_data) => {
                     info!("Fetched market data for {}: Price = {}", symbol, market_data.price);
                     
                     // Process data and generate signal
-                    match trading_bot.process_market_data(market_data).await {
+                    match bot_clone.process_market_data(market_data.clone()).await {
                         Ok(Some(signal)) => {
                             info!("Signal generated: {:?}", signal);
-                            // Execute the signal using execute_swap
-                            let slippage_bps = config.dex_trading.slippage_bps; // Read from config
-                            if let Err(e) = trading_bot.execute_swap(signal, slippage_bps).await {
-                                error!("Failed to execute swap: {}", e);
+                            // Use if let Some(...) to check telegram_bot
+                            if let Some(tg) = &telegram_bot {
+                                if let Err(e) = tg.send_trading_signal(&signal).await {
+                                    error!("Failed to send Telegram signal: {}", e);
+                                }
+                            }
+                            let slippage = config.dex_trading.slippage_bps;
+                            if let Err(e) = bot_clone.execute_swap(signal, slippage).await {
+                                error!("Swap execution error: {}", e);
+                                // Use if let Some(...) to check telegram_bot
                                 if let Some(tg) = &telegram_bot {
-                                    let _ = tg.send_message(&format!("Failed to execute swap: {}", e)).await;
+                                    if let Err(e_tg) = tg.send_alert(&format!("Swap execution failed: {}", e)).await {
+                                        error!("Failed to send Telegram alert: {}", e_tg);
+                                    }
                                 }
                             }
                         }
@@ -149,8 +186,11 @@ async fn main() -> Result<()> {
                         }
                         Err(e) => {
                             error!("Error processing market data for {}: {}", symbol, e);
+                            // Use if let Some(...) to check telegram_bot
                             if let Some(tg) = &telegram_bot {
-                                let _ = tg.send_message(&format!("Error processing market data for {}: {}", symbol, e)).await;
+                                if let Err(e_tg) = tg.send_alert(&format!("Error processing {}: {}", symbol, e)).await {
+                                    error!("Failed to send Telegram alert: {}", e_tg);
+                                }
                             }
                         }
                     }

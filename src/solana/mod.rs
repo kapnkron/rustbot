@@ -3,19 +3,17 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::signer::{keypair::Keypair, Signer};
 use crate::config::{SolanaConfig, SecurityConfig}; // Import SecurityConfig
 use crate::error::{Result, Error}; // Assuming crate::error::Error exists
-use keyring::Entry; // Ensure Entry is imported
 use std::sync::Arc;
 use log; // Import log crate
-use solana_sdk::pubkey::Pubkey;
-use spl_associated_token_account::get_associated_token_address;
-use std::str::FromStr; // For Pubkey::from_str
-use std::panic; // Ensure panic is imported
 use serde::{Deserialize, Serialize};
 use solana_sdk::transaction::Transaction; // Added for deserializing swap transactions
 use std::time::{Duration, Instant}; // Added for potential timing/timeouts
-use base64; // Added for base64 decoding
 use bincode; // Added for bincode deserialization
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use solana_sdk::pubkey::Pubkey;
+use spl_associated_token_account::get_associated_token_address;
+use std::str::FromStr; // For Pubkey::from_str
+use reqwest;
 
 // --- Jupiter API Structures --- //
 
@@ -135,7 +133,7 @@ impl SolanaManager {
         })
     }
 
-    fn get_keypair(&self) -> Result<Keypair> {
+    pub fn get_keypair(&self) -> Result<Keypair> {
         #[cfg(test)]
         {
             log::warn!("Using hardcoded test keypair for SolanaManager!");
@@ -144,6 +142,10 @@ impl SolanaManager {
         
         #[cfg(not(test))]
         {
+            use crate::error::Error;
+            use keyring::Entry;
+            use std::panic;
+
             let service_name = &self.keychain_service_name;
             let username = &self.solana_key_username;
             log::debug!(
@@ -404,5 +406,134 @@ impl SolanaManager {
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SolanaConfig;
+    use crate::tests::common::create_test_config;
+    use solana_sdk::signer::Signer;
+    use std::env;
+    use dotenv::dotenv;
+
+    fn setup_test_environment() -> (SolanaManager, SolanaConfig) {
+        dotenv().ok(); 
+        let config = create_test_config();
+        let solana_config = config.solana.clone();
+        let security_config = config.security.clone();
+        let manager = SolanaManager::new(solana_config.clone(), &security_config).expect("Failed to create SolanaManager");
+        (manager, solana_config)
+    }
+
+    #[test]
+    fn test_solana_manager_new() {
+        let (_manager, _config) = setup_test_environment();
+    }
+
+    #[test]
+    fn test_get_keypair_test_mode() {
+        let (manager, _config) = setup_test_environment();
+        let keypair_result = manager.get_keypair();
+        assert!(keypair_result.is_ok(), "get_keypair failed in test mode");
+        let keypair = keypair_result.unwrap();
+        let keypair2 = manager.get_keypair().unwrap();
+        assert_ne!(keypair.pubkey(), keypair2.pubkey(), "Test mode should generate new keypairs each call");
+    }
+    
+    #[tokio::test]
+    #[ignore] 
+    async fn test_get_sol_balance_live() {
+        let (manager, config) = setup_test_environment();
+        if config.rpc_url.contains("localhost") || config.rpc_url.is_empty() {
+             println!("Skipping live balance test against local or empty RPC URL.");
+             return;
+        }
+        let balance_result = manager.get_balance(None).await;
+        assert!(balance_result.is_ok(), "Failed to get SOL balance: {:?}", balance_result.err());
+        let balance = balance_result.unwrap();
+         println!("Wallet SOL balance: {}", balance);
+    }
+
+    #[tokio::test]
+    #[ignore] 
+    async fn test_get_spl_token_balance_live() {
+        let (manager, config) = setup_test_environment();
+        let test_spl_mint = env::var("TEST_SPL_MINT").unwrap_or_else(|_| "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string());
+
+        if config.rpc_url.contains("localhost") || config.rpc_url.is_empty() {
+             println!("Skipping live balance test against local or empty RPC URL.");
+             return;
+        }
+
+        let balance_result = manager.get_balance(Some(&test_spl_mint)).await;
+        assert!(balance_result.is_ok(), "Failed to get SPL token balance: {:?}", balance_result.err());
+        let balance = balance_result.unwrap();
+         println!("Wallet {} balance: {}", test_spl_mint, balance);
+    }
+
+
+    // --- Jupiter API Tests --- //
+    
+    fn get_jupiter_test_params() -> (String, String, u64, u16) {
+        let input_mint = env::var("JUPITER_TEST_INPUT_MINT").unwrap_or_else(|_| "So11111111111111111111111111111111111111112".to_string());
+        let output_mint = env::var("JUPITER_TEST_OUTPUT_MINT").unwrap_or_else(|_| "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string());
+        let amount_str = env::var("JUPITER_TEST_AMOUNT_LAMPORTS").unwrap_or_else(|_| "100000".to_string());
+        let amount = amount_str.parse::<u64>().expect("Invalid JUPITER_TEST_AMOUNT_LAMPORTS");
+        let slippage_bps = 50; 
+        (input_mint, output_mint, amount, slippage_bps)
+    }
+
+    #[tokio::test]
+    #[ignore] 
+    async fn test_get_jupiter_quote_live() {
+        let (manager, config) = setup_test_environment();
+         if config.rpc_url.contains("localhost") || config.rpc_url.is_empty() {
+             println!("Skipping live Jupiter test against local or empty RPC URL.");
+             return;
+         }
+        let (input_mint, output_mint, amount, slippage_bps) = get_jupiter_test_params();
+
+        let quote_result = manager.get_quote(&input_mint, &output_mint, amount, slippage_bps).await;
+        assert!(quote_result.is_ok(), "Failed to get Jupiter quote: {:?}", quote_result.err());
+        let quote = quote_result.unwrap();
+        println!("Received Jupiter Quote: {:?}", quote);
+        assert_eq!(quote.input_mint, input_mint);
+        assert_eq!(quote.output_mint, output_mint);
+        assert!(quote.in_amount.parse::<u64>().unwrap() >= amount); 
+        assert!(quote.out_amount.parse::<u64>().unwrap() > 0);
+        assert!(!quote.route_plan.is_empty());
+    }
+
+     #[tokio::test]
+     #[ignore] 
+     async fn test_execute_jupiter_swap_live() {
+         let (manager, config) = setup_test_environment();
+         if config.rpc_url.contains("localhost") || config.rpc_url.is_empty() {
+             println!("Skipping live Jupiter swap test against local or empty RPC URL.");
+             return;
+         }
+        let (input_mint, output_mint, amount, slippage_bps) = get_jupiter_test_params();
+         let sol_balance = manager.get_balance(None).await.expect("Failed to get SOL balance for swap test");
+         println!("Wallet SOL balance before swap: {}", sol_balance);
+         if sol_balance < amount + 5000 { 
+              panic!("Insufficient SOL balance ({}) in test wallet for swap test (needs > {} lamports). Fund the wallet derived from your test private key.", sol_balance, amount + 5000);
+         }
+
+         let swap_result = manager.execute_swap(&input_mint, &output_mint, amount, slippage_bps).await;
+         assert!(swap_result.is_ok(), "Failed to execute Jupiter swap: {:?}", swap_result.err());
+         let signature = swap_result.unwrap();
+         println!("Jupiter Swap successful! Signature: {}", signature);
+         assert!(!signature.is_empty());
+     }
+
+    async fn test_get_spl_token_balance() -> Result<()> {
+        let (solana_manager, _config) = setup_test_environment();
+        // ... rest of test setup ...
+        let balance = solana_manager.get_balance(None).await?;
+        // assert!(balance >= 0); // Removed - Unsigned integer comparison
+        println!("SPL Token Balance: {}", balance);
+        Ok(())
     }
 } 

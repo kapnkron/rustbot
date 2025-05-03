@@ -61,6 +61,12 @@ pub struct PerformanceMonitor {
     ml_start_times: RwLock<HashMap<String, Instant>>,
 }
 
+impl Default for PerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceMonitor {
     pub fn new() -> Self {
         Self {
