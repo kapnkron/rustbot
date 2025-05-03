@@ -1,23 +1,40 @@
 [general]
 log_level = "info"
-data_dir = "/var/lib/trading-bot/data"
-backup_dir = "/var/lib/trading-bot/backups"
+data_dir = "data"
+backup_dir = "backups"
 
 [api]
-host = "127.0.0.1"
-port = 8080
+# host = "127.0.0.1" # These seem to belong elsewhere or are old?
+# port = 8080      # These seem to belong elsewhere or are old?
+coingecko_api_key = "CG-JNDG8WRtEMbKJdWwYnpKsg1i"
+coinmarketcap_api_key = "c3fd3c4c-3d9d-4f07-bd28-1f7d19597e01"
+cryptodatadownload_api_key = "YOUR_CRYPTODATADOWNLOAD_KEY" # Placeholder - Update required
 
 [database]
-path = "/var/lib/trading-bot/data/trading.db"
+# path = "/var/lib/trading-bot/data/trading.db" # Remove path if url is used
+# url and max_connections seem missing based on src/config/mod.rs definition
+url = "sqlite://data/trading.db" # Changed to use local data dir
+max_connections = 10 # Example value
 
 [monitoring]
-alert_threshold = 0.1
-check_interval = 60
+# alert_threshold = 0.1 # Old/Different structure?
+# check_interval = 60   # Old/Different structure?
+# Need fields matching MonitoringConfig struct: enable_prometheus, prometheus_port, alert_thresholds = { price_change_threshold, volume_threshold, error_rate_threshold }
+enable_prometheus = false
+prometheus_port = 9090
+
+[monitoring.alert_thresholds]
+price_change_threshold = 0.05
+volume_threshold = 10000.0
+error_rate_threshold = 0.1
 
 [security]
 api_key_rotation_days = 30
-rate_limit_requests = 100
-rate_limit_window_seconds = 60
+# rate_limit_requests = 100 # Missing based on src/config/mod.rs definition
+# rate_limit_window_seconds = 60 # Missing based on src/config/mod.rs definition
+keychain_service_name = "trading-bot-solana" # Default service name for OS keychain
+solana_key_username = "main-solana-key"      # Default username for OS keychain
+ton_key_username = "main-ton-key" # Placeholder if TON needed
 
 [dex_trading]
 trading_pair_symbol = "SOL/USDC" # Placeholder - Update required
@@ -25,4 +42,53 @@ base_token_mint = "So11111111111111111111111111111111111111112" # Placeholder (S
 quote_token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # Placeholder (USDC) - Update required
 base_token_decimals = 9 # Placeholder (SOL) - Update required
 quote_token_decimals = 6 # Placeholder (USDC) - Update required
-slippage_bps = 50 # Example: 0.5% slippage 
+slippage_bps = 50 # Example: 0.5% slippage
+
+# Adding placeholders for other missing root config sections/fields based on src/config/mod.rs
+
+[trading]
+risk_level = 0.5
+max_position_size = 1000.0
+stop_loss_percentage = 0.02
+take_profit_percentage = 0.1
+trading_pairs = ["SOL/USDC"]
+
+[telegram]
+bot_token = "YOUR_BOT_TOKEN"
+chat_id = "YOUR_CHAT_ID"
+enable_notifications = true
+
+[ml]
+# Direct fields of MLConfig
+loss_function = "MSE" 
+input_size = 9 
+hidden_size = 20 
+output_size = 2 
+learning_rate = 0.001
+model_path = "path/to/model.onnx"
+confidence_threshold = 0.7
+training_batch_size = 32
+training_epochs = 100
+window_size = 1
+min_data_points = 1
+validation_split = 0.2
+early_stopping_patience = 5
+save_best_model = true
+evaluation_window_size = 100
+
+# Nested architecture field
+[ml.architecture]
+input_size = 9 # Corresponds to ModelArchitecture.input_size
+hidden_size = 20 # Corresponds to ModelArchitecture.hidden_size
+output_size = 2 # Corresponds to ModelArchitecture.output_size
+num_layers = 2
+dropout = 0.1 
+activation = "ReLU" 
+
+[solana]
+rpc_url = "https://api.mainnet-beta.solana.com" # Example Solana RPC URL
+
+# Add missing [logging] section based on other config file
+[logging]
+level = "info"
+file_path = "logs/trading-bot.log" # Use local path

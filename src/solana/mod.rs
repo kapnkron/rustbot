@@ -136,12 +136,26 @@ impl SolanaManager {
     pub fn get_keypair(&self) -> Result<Keypair> {
         #[cfg(test)]
         {
-            log::warn!("Using hardcoded test keypair for SolanaManager!");
-            Ok(Keypair::new())
+            use std::env;
+            use crate::error::Error; 
+
+            log::info!("Attempting to load test keypair from TEST_SOLANA_PRIVATE_KEY environment variable.");
+            match env::var("TEST_SOLANA_PRIVATE_KEY") {
+                Ok(key_material) => {
+                    // Directly parse, assuming panic on failure as per Keypair::from_base58_string behavior.
+                    // Wrap the successful result in Ok for the function signature.
+                    // If parsing fails, the test will panic, which is acceptable for test setup.
+                    Ok(Keypair::from_base58_string(&key_material))
+                }
+                Err(_) => { // This arm correctly returns Err(Error)
+                    log::error!("TEST_SOLANA_PRIVATE_KEY environment variable not set or invalid for tests requiring a keypair.");
+                    Err(Error::ConfigError("TEST_SOLANA_PRIVATE_KEY must be set for this test".to_string()))
+                }
+            }
         }
-        
+
         #[cfg(not(test))]
-        {
+        { 
             use crate::error::Error;
             use keyring::Entry;
             use std::panic;
@@ -154,19 +168,24 @@ impl SolanaManager {
                 username
             );
             let entry = Entry::new(service_name, username)
-                .map_err(|e| Error::KeychainError(format!("Failed to create keychain entry: {}", e)))?;
+                .map_err(|e| Error::KeychainError(format!("Failed to create keychain entry: {}", e)))?; 
             match entry.get_password() {
                 Ok(key_material) => {
                     let result = panic::catch_unwind(|| Keypair::from_base58_string(&key_material));
                     match result {
-                        Ok(keypair) => Ok(keypair),
-                        Err(_) => Err(Error::KeychainError("Failed to parse key material from keychain (invalid format)".to_string())),
+                        Ok(keypair_result_from_parse) => { // This is now the Keypair struct
+                            // No error mapping needed here as keypair_result_from_parse is the Keypair itself.
+                            // The panic::catch_unwind already handled the potential panic from from_base58_string.
+                            Ok(keypair_result_from_parse)
+                        }
+                        Err(_) => Err(Error::KeychainError("Panic caught while parsing key material from keychain".to_string())), // Correct: Err(Error)
                     }
                 }
+                 // Other Err arms already return Err(Error)
                 Err(keyring::Error::NoEntry) => Err(Error::KeychainError(format!("No key found in keychain for service '{}', username '{}'", service_name, username))),
                 Err(e) => Err(Error::KeychainError(format!("Keychain access error for service '{}', username '{}': {}", service_name, username, e))),
             }
-        }
+        } 
     }
 
     pub async fn get_balance(&self, token_mint_address_str: Option<&str>) -> Result<u64> {
@@ -434,12 +453,20 @@ mod tests {
 
     #[test]
     fn test_get_keypair_test_mode() {
+        dotenv::dotenv().ok(); // Ensure .env is loaded for this test too
         let (manager, _config) = setup_test_environment();
         let keypair_result = manager.get_keypair();
-        assert!(keypair_result.is_ok(), "get_keypair failed in test mode");
-        let keypair = keypair_result.unwrap();
-        let keypair2 = manager.get_keypair().unwrap();
-        assert_ne!(keypair.pubkey(), keypair2.pubkey(), "Test mode should generate new keypairs each call");
+        assert!(keypair_result.is_ok(), 
+            "get_keypair failed in test mode. Ensure TEST_SOLANA_PRIVATE_KEY is set in .env or environment: {:?}", 
+            keypair_result.err()
+        );
+        
+        // Optional: Verify consistency if called again
+        let keypair1 = keypair_result.unwrap();
+        let keypair2_result = manager.get_keypair();
+        assert!(keypair2_result.is_ok());
+        let keypair2 = keypair2_result.unwrap();
+        assert_eq!(keypair1.pubkey(), keypair2.pubkey(), "Test keypair should be consistent across calls");
     }
     
     #[tokio::test]

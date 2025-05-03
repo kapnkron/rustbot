@@ -90,9 +90,12 @@ impl ModelArchitecture {
 }
 
 pub fn get_device() -> Device {
-    if tch::Cuda::is_available() {
+    // Only check for CUDA if the "cuda" feature is enabled AND CUDA is available
+    if cfg!(feature = "cuda") && tch::Cuda::is_available() {
+        log::info!("CUDA feature enabled and CUDA device found. Using CUDA:0.");
         Device::Cuda(0)
     } else {
+        log::info!("CUDA not available or feature not enabled. Using CPU.");
         Device::Cpu
     }
 } 

@@ -2,6 +2,8 @@ use crate::error::Result;
 use crate::trading::TradingMarketData;
 use crate::ml::MLConfigError;
 use std::collections::VecDeque;
+use crate::api::MarketData;
+use log::debug;
 
 #[derive(Debug)]
 pub struct DataPreprocessor {
@@ -202,6 +204,115 @@ impl DataPreprocessor {
         let normalized = (market_cap.ln() - 20.0) / 10.0;
         Ok(normalized.clamp(0.0, 1.0))
     }
+}
+
+/// Prepares feature vectors and corresponding classification labels from historical data.
+/// 
+/// Args:
+/// * `historical_data`: Slice of raw market data points, ordered chronologically.
+/// * `min_history_points`: Minimum data points needed by the preprocessor (e.g., 26 for MACD).
+/// * `prediction_horizon`: How many steps to look ahead to determine the label (e.g., 60 for 1 hour).
+/// * `threshold`: The percentage change threshold (e.g., 0.005 for 0.5%) to define Buy/Sell labels.
+///
+/// Returns:
+/// * A tuple containing `(features, labels)`, where `features` is a Vec of feature vectors 
+///   and `labels` is a Vec of corresponding one-hot encoded labels (`[1.0, 0.0]` for Buy, `[0.0, 1.0]` for Sell).
+///   Data points not meeting the threshold are excluded.
+pub fn prepare_features_and_labels(
+    historical_data: &[MarketData], 
+    min_history_points: usize, 
+    prediction_horizon: usize, 
+    threshold: f64
+) -> Result<(Vec<Vec<f64>>, Vec<Vec<f64>>)> {
+    
+    let mut all_features = Vec::new();
+    let mut all_labels = Vec::new();
+    
+    if historical_data.len() < min_history_points + prediction_horizon {
+        return Err(MLConfigError::InvalidConfig(format!(
+            "Insufficient data for preparation: need at least {} points, got {}", 
+            min_history_points + prediction_horizon, historical_data.len()
+        )).into());
+    }
+
+    // Initialize preprocessor
+    let mut preprocessor = DataPreprocessor::new(min_history_points)?;
+    let mut skipped_warmup = 0;
+    let mut skipped_threshold = 0;
+    let mut buy_labels = 0;
+    let mut sell_labels = 0;
+
+    // Iterate through data to generate features and labels
+    for i in 0..historical_data.len() {
+        // Convert raw MarketData to TradingMarketData if necessary (assuming direct conversion)
+        // If conversion logic is needed, implement it here or adjust input type.
+        // For now, assume MarketData has the necessary fields (price, volume, etc.)
+        // or implement a From/Into trait.
+        // Let's assume we need a conversion/mapping for now:
+        let trading_data = TradingMarketData {
+             symbol: historical_data[i].symbol.clone(),
+             price: historical_data[i].price,
+             volume: historical_data[i].volume,
+             market_cap: historical_data[i].market_cap,
+             price_change_24h: historical_data[i].price_change_24h,
+             volume_change_24h: historical_data[i].volume_change_24h,
+             timestamp: historical_data[i].timestamp,
+             // Assuming the base MarketData doesn't have these, add placeholders or derive if possible
+             volume_24h: historical_data[i].volume, // Placeholder
+             change_24h: historical_data[i].price_change_24h, // Placeholder
+             quote: historical_data[i].quote.clone(), // Assuming quote exists and is cloneable
+         };
+
+        // Feed data into preprocessor. We might ignore errors during warmup.
+        match preprocessor.process_market_data(&trading_data) {
+            Ok(current_features) => {
+                // Check if we have enough future data to calculate the label
+                if i + prediction_horizon < historical_data.len() {
+                    let price_i = historical_data[i].price;
+                    let price_future = historical_data[i + prediction_horizon].price;
+
+                    // Avoid division by zero if price_i is zero or very small
+                    if price_i.abs() > f64::EPSILON {
+                        let change = (price_future - price_i) / price_i;
+
+                        if change > threshold { // Price increased significantly -> Buy label
+                            all_features.push(current_features);
+                            all_labels.push(vec![1.0, 0.0]);
+                            buy_labels += 1;
+                        } else if change < -threshold { // Price decreased significantly -> Sell label
+                            all_features.push(current_features);
+                            all_labels.push(vec![0.0, 1.0]);
+                            sell_labels += 1;
+                        } else {
+                            // Price change was within the threshold -> Skip (Hold)
+                            skipped_threshold += 1;
+                        }
+                    } else {
+                         // Skip if current price is zero/too small
+                         skipped_threshold += 1;
+                    }
+                } else {
+                    // Not enough future data points left to determine label for this point
+                    break; // Stop processing as we can't look far enough ahead
+                }
+            }
+            Err(Error::MLConfigError(MLConfigError::InvalidConfig(msg))) if msg.contains("Insufficient data points") => {
+                // Ignore "Insufficient data" errors during the initial warmup phase
+                skipped_warmup += 1;
+            }
+            Err(e) => {
+                // Propagate other unexpected errors
+                return Err(e);
+            }
+        }
+    }
+    
+    debug!(
+        "Feature/Label Prep: Buy={}, Sell={}, Skipped(Warmup)={}, Skipped(Threshold)={}, TotalInput={}",
+        buy_labels, sell_labels, skipped_warmup, skipped_threshold, historical_data.len()
+    );
+
+    Ok((all_features, all_labels))
 }
 
 #[cfg(test)]

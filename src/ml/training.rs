@@ -10,6 +10,7 @@ use log::{info, warn};
 use super::architecture::{ModelArchitecture, Activation, LossFunction, get_device};
 use crate::trading::TradingMarketData;
 use crate::ml::{ModelConfig, MLConfigError};
+use crate::ml::preprocessing::prepare_features_and_labels;
 
 pub struct ModelTrainer {
     config: ModelConfig,
@@ -111,18 +112,52 @@ impl ModelTrainer {
     ) -> Result<()> {
         let patience = early_stopping_patience.unwrap_or(self.config.early_stopping_patience);
         
+        // --- Prepare Features and Labels --- 
+        // TODO: Make horizon and threshold configurable
+        let prediction_horizon = 60; // e.g., 1 hour ahead if data is 1-minute frequency
+        let threshold = 0.005; // e.g., 0.5% change
+        let min_history = self.config.window_size; // Or use a dedicated min_data_points config?
+        // Assuming ModelConfig should have min_data_points required by preprocessor.
+        // Let's add it to the local ModelConfig struct if it doesn't exist or use window_size.
+        // For now, assume window_size is sufficient history for the preprocessor.
+        // Rerun search for ModelConfig definition in this file if needed.
+
+        info!("Preparing training features and labels...");
+        let (train_features, train_labels) = prepare_features_and_labels(
+            training_data,
+            min_history, // Ensure this value is >= 26 for MACD
+            prediction_horizon, 
+            threshold
+        )?;
+        info!("Prepared {} training samples.", train_features.len());
+
+        info!("Preparing validation features and labels...");
+        let (val_features, val_labels) = prepare_features_and_labels(
+            validation_data,
+            min_history, // Ensure this value is >= 26 for MACD
+            prediction_horizon, 
+            threshold
+        )?;
+        info!("Prepared {} validation samples.", val_features.len());
+
+        if train_features.is_empty() || val_features.is_empty() {
+            warn!("No training or validation samples generated after preparation. Check data length, horizon, and threshold.");
+            return Err(MLConfigError::InvalidConfig("No samples generated for training/validation".to_string()).into());
+        }
+        // --- End Preparation --- 
+
         for epoch in 0..self.config.training_epochs {
-            // Training phase
+            // Training phase - Use prepared features/labels
             let training_loss = self.train_epoch(
-                &training_data.iter().map(|d| d.to_features()).collect::<Vec<_>>(),
-                &training_data.iter().map(|d| d.to_labels()).collect::<Vec<_>>(),
+                &train_features, 
+                &train_labels,
                 self.config.training_batch_size,
             )?;
 
-            // Validation phase
+            // Validation phase - Use prepared features/labels
             let validation_loss = self.evaluate(
-                &validation_data.iter().map(|d| d.to_features()).collect::<Vec<_>>(),
-                &validation_data.iter().map(|d| d.to_labels()).collect::<Vec<_>>(),
+                &val_features, 
+                &val_labels,
             )?;
 
             info!(
@@ -137,11 +172,12 @@ impl ModelTrainer {
                 
                 if self.config.save_best_model {
                     self.save(Path::new(&self.config.model_path))?;
+                    info!("Saved new best model (val_loss: {:.4}) to {}", validation_loss, self.config.model_path);
                 }
             } else {
                 self.patience_counter += 1;
                 if self.patience_counter >= patience {
-                    warn!("Early stopping triggered after {} epochs", epoch);
+                    warn!("Early stopping triggered after {} epochs", epoch + 1);
                     break;
                 }
             }

@@ -140,7 +140,7 @@
 
 *   **Solana Keychain Integration:**
     *   [ ] Determine the final strategy for storing/retrieving the Solana keypair (OS Keychain via `keyring`, config file, environment variable, hardware wallet integration?).
-    *   [ ] Implement and test the chosen key retrieval method for production builds (remove or refine the `#[cfg(test)]` workaround in `SolanaManager::get_keypair`).
+    *   [x] Implement and test the chosen key retrieval method for production builds (remove or refine the `#[cfg(test)]` workaround in `SolanaManager::get_keypair`).
     *   [ ] Ensure the necessary keychain entries/files/variables exist in the deployment environment.
 *   **Solana Swap Implementation:**
     *   [ ] Implement the actual DEX interaction logic within `SolanaManager::execute_swap` (e.g., using Jupiter SDK/API).
@@ -159,8 +159,10 @@
     *   [ ] Review all code commented out due to `dead_code` warnings (unused fields, methods, constants in API clients, Monitor, services, etc.). Decide whether to remove it permanently or implement the corresponding features.
     *   [ ] Review fields/variables prefixed with `_` to confirm they are intentionally unused or if the logic needs adjustment.
 *   **Address Remaining Warnings:**
+    *   [x] Fix compilation errors (e.g., `get_keypair` type errors).
     *   [ ] Decide on handling the `unexpected_cfgs` warning for the "cuda" feature in `src/ml/architecture.rs` (remove check or add feature).
     *   [ ] Decide whether to suppress the test-only `unused_variables` warnings in `src/trading/mod.rs`.
+    *   [x] Address `BufferTooSmall` panic in tests by fixing `.env` key format.
 
 ## Feature Implementation
 
