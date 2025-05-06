@@ -1,4 +1,4 @@
-use crate::error::{Result};
+use crate::error::Result;
 use ring::rand::SecureRandom;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

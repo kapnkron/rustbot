@@ -1,19 +1,18 @@
 use crate::error::Result;
 use crate::api::MarketData;
-use crate::config::MLConfig;
-use tch::{Device, Kind, Tensor, nn};
+use crate::ml::config::MLConfig;
+use tch::{Device, Tensor, nn};
+use tch::Kind;
+use tch::nn::{OptimizerConfig, Module};
 use std::path::Path;
-use chrono::{DateTime, Utc};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use log::{info, warn};
-use super::architecture::{ModelArchitecture, Activation, LossFunction, get_device};
-use crate::trading::TradingMarketData;
-use crate::ml::{ModelConfig, MLConfigError};
+use super::architecture::{LossFunction, get_device};
+use crate::ml::config::MLConfigError;
 use crate::ml::preprocessing::prepare_features_and_labels;
+use std::fs;
 
 pub struct ModelTrainer {
-    config: ModelConfig,
+    config: MLConfig,
     device: Device,
     var_store: nn::VarStore,
     model: nn::Sequential,
@@ -22,21 +21,8 @@ pub struct ModelTrainer {
     patience_counter: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelConfig {
-    pub architecture: ModelArchitecture,
-    pub loss_function: LossFunction,
-    pub learning_rate: f64,
-    pub model_path: String,
-    pub window_size: usize,
-    pub training_batch_size: usize,
-    pub training_epochs: usize,
-    pub early_stopping_patience: usize,
-    pub save_best_model: bool,
-}
-
 impl ModelTrainer {
-    pub fn new(config: ModelConfig) -> Result<Self> {
+    pub fn new(config: MLConfig) -> Result<Self> {
         let device = get_device();
         let var_store = nn::VarStore::new(device);
         let model = config.architecture.create_model(&var_store.root())?;
@@ -85,16 +71,22 @@ impl ModelTrainer {
 
         let input = Tensor::f_from_slice(&features.concat())?
             .reshape(&[batch_size, feature_size])
+            .to_kind(Kind::Float)
             .to(self.device);
         
-        let target = Tensor::f_from_slice(&labels.concat())?
+        let target_floats = Tensor::f_from_slice(&labels.concat())?
             .reshape(&[batch_size, label_size])
+            .to_kind(Kind::Float)
             .to(self.device);
         
         let output = self.model.forward(&input);
         let loss = match self.config.loss_function {
-            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
-            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+            LossFunction::MSE => output.mse_loss(&target_floats, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => {
+                // Convert one-hot encoded floats to class indices (long tensor)
+                let target_indices = target_floats.argmax(1, false).to_kind(Kind::Int64);
+                output.cross_entropy_for_logits(&target_indices)
+            }
         };
         
         self.optimizer.zero_grad();
@@ -108,19 +100,14 @@ impl ModelTrainer {
         &mut self,
         training_data: &[MarketData],
         validation_data: &[MarketData],
-        early_stopping_patience: Option<usize>,
     ) -> Result<()> {
-        let patience = early_stopping_patience.unwrap_or(self.config.early_stopping_patience);
+        let patience = self.config.early_stopping_patience;
         
         // --- Prepare Features and Labels --- 
         // TODO: Make horizon and threshold configurable
         let prediction_horizon = 60; // e.g., 1 hour ahead if data is 1-minute frequency
         let threshold = 0.005; // e.g., 0.5% change
-        let min_history = self.config.window_size; // Or use a dedicated min_data_points config?
-        // Assuming ModelConfig should have min_data_points required by preprocessor.
-        // Let's add it to the local ModelConfig struct if it doesn't exist or use window_size.
-        // For now, assume window_size is sufficient history for the preprocessor.
-        // Rerun search for ModelConfig definition in this file if needed.
+        let min_history = self.config.min_data_points;
 
         info!("Preparing training features and labels...");
         let (train_features, train_labels) = prepare_features_and_labels(
@@ -145,7 +132,7 @@ impl ModelTrainer {
             return Err(MLConfigError::InvalidConfig("No samples generated for training/validation".to_string()).into());
         }
         // --- End Preparation --- 
-
+        
         for epoch in 0..self.config.training_epochs {
             // Training phase - Use prepared features/labels
             let training_loss = self.train_epoch(
@@ -191,31 +178,49 @@ impl ModelTrainer {
         let feature_size = features[0].len() as i64;
         let label_size = labels[0].len() as i64;
 
-        let input = Tensor::of_slice(&features.iter().flatten().cloned().collect::<Vec<_>>())
+        let input = Tensor::f_from_slice(&features.iter().flatten().cloned().collect::<Vec<_>>())?
             .reshape(&[batch_size, feature_size])
+            .to_kind(Kind::Float)
             .to(self.device);
         
-        let target = Tensor::of_slice(&labels.iter().flatten().cloned().collect::<Vec<_>>())
+        let target_floats = Tensor::f_from_slice(&labels.iter().flatten().cloned().collect::<Vec<_>>())?
             .reshape(&[batch_size, label_size])
+            .to_kind(Kind::Float)
             .to(self.device);
         
         let output = self.model.forward(&input);
         let loss = match self.config.loss_function {
-            LossFunction::MSE => output.mse_loss(&target, tch::Reduction::Mean),
-            LossFunction::CrossEntropy => output.cross_entropy_for_logits(&target),
+            LossFunction::MSE => output.mse_loss(&target_floats, tch::Reduction::Mean),
+            LossFunction::CrossEntropy => {
+                // Convert one-hot encoded floats to class indices (long tensor)
+                let target_indices = target_floats.argmax(1, false).to_kind(Kind::Int64);
+                output.cross_entropy_for_logits(&target_indices)
+            }
         };
         
         Ok(loss.double_value(&[]) as f64)
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
+        // Ensure the parent directory exists
+        if let Some(parent) = path.parent() {
+            // Let ? handle the conversion from io::Error to crate::error::Error
+            fs::create_dir_all(parent)?;
+            info!("Ensured parent directory exists: {}", parent.display());
+        }
         self.var_store.save(path)?;
         Ok(())
     }
 
     pub fn load(&mut self, path: &Path) -> Result<()> {
         self.var_store.load(path)?;
+        info!("Loaded model state from {}", path.display());
         Ok(())
+    }
+
+    // Add a public getter for the model
+    pub fn model(&self) -> &nn::Sequential {
+        &self.model
     }
 }
 
@@ -223,6 +228,8 @@ impl ModelTrainer {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use crate::api::types::{Quote, USDData};
+    use super::super::architecture::{ModelArchitecture, Activation};
 
     fn create_test_market_data(price: f64, volume: f64, market_cap: f64) -> MarketData {
         MarketData {
@@ -233,21 +240,42 @@ mod tests {
             market_cap,
             price_change_24h: 0.0,
             volume_change_24h: 0.0,
+            volume_24h: volume,
+            change_24h: 0.0,
+            quote: Quote { 
+                usd: USDData {
+                    price,
+                    volume_24h: volume,
+                    market_cap,
+                    percent_change_24h: 0.0,
+                    volume_change_24h: 0.0,
+                }
+            },
         }
     }
 
     #[test]
     fn test_model_trainer() -> Result<()> {
-        let config = ModelConfig {
-            architecture: ModelArchitecture::new(9, 20, 2),
+        let config = MLConfig {
+            architecture: ModelArchitecture {
+                input_size: 11,
+                hidden_size: 20,
+                output_size: 2,
+                num_layers: 2,
+                dropout: Some(0.1),
+                activation: Activation::ReLU,
+            },
             loss_function: LossFunction::CrossEntropy,
             learning_rate: 0.001,
-            model_path: "model.pt".to_string(),
+            model_path: "temp_test_model.ot".to_string(),
             window_size: 10,
+            min_data_points: 26,
             training_batch_size: 32,
             training_epochs: 10,
             early_stopping_patience: 5,
             save_best_model: true,
+            validation_split: 0.2,
+            evaluation_window_size: 60,
         };
 
         let mut trainer = ModelTrainer::new(config)?;
@@ -271,8 +299,10 @@ mod tests {
         }
 
         // Train model
-        trainer.train(&training_data, &validation_data, Some(5))?;
+        trainer.train(&training_data, &validation_data)?;
         
+        // Clean up temp model file
+        let _ = std::fs::remove_file("temp_test_model.ot");
         Ok(())
     }
 } 

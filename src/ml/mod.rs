@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::error::Error;
-use tch::{Device, Tensor};
+use tch::{Device, Tensor, Kind};
 use std::path::Path;
 use crate::trading::TradingMarketData;
 use chrono::{DateTime, Utc};
@@ -11,6 +11,14 @@ use tch::nn::Module;
 use log;
 use tch::nn::ModuleT;
 use async_trait::async_trait;
+use crate::config::Config;
+use crate::data_loader::load_market_data_from_csv;
+use crate::ml::training::ModelTrainer;
+use log::info;
+use log::warn;
+use anyhow::{Context, Result as AnyhowResult};
+use std::path::PathBuf;
+use crate::ml::preprocessing::prepare_features_and_labels;
 
 mod preprocessing;
 pub use preprocessing::DataPreprocessor;
@@ -23,6 +31,8 @@ pub use versioning::{ModelVersion, ModelVersionManager};
 
 mod architecture;
 pub use architecture::{ModelArchitecture, Activation, LossFunction, get_device};
+
+mod training;
 
 pub mod config;
 pub use config::{MLConfig, ModelConfig, MLConfigError};
@@ -270,6 +280,126 @@ impl Predictor for TradingModel {
 
         Ok(output_vec)
     }
+}
+
+/// Public function to orchestrate the model training process.
+pub async fn run_training_session(
+    config_path: PathBuf,
+    csv_path: PathBuf,
+    model_output_path: PathBuf,
+    split_ratio: f64,
+) -> AnyhowResult<()> {
+    info!("Starting model training session via run_training_session...");
+    info!("Config path: \"{}\"", config_path.display());
+    info!("CSV data path: \"{}\"", csv_path.display());
+    info!("Model output path: \"{}\"", model_output_path.display());
+    info!("Split ratio: {}", split_ratio);
+
+    // --- 1. Load Configuration --- (Handles its own logging)
+    let config = Config::load(&config_path)
+        .context("Failed to load configuration")?;
+    let ml_config = config.ml; // Use the specific ML config
+
+    // --- 2. Load Data --- (Handles its own logging)
+    let market_data = load_market_data_from_csv(&csv_path)
+        .context(format!("Failed to load market data from {}", csv_path.display()))?;
+    info!("Loaded {} historical data records.", market_data.len());
+
+    // --- 3. Split Data --- (Using a simple split for now)
+    let split_index = (market_data.len() as f64 * split_ratio) as usize;
+    if split_index == 0 || split_index >= market_data.len() {
+        anyhow::bail!("Invalid split ratio {} results in zero training or validation samples.", split_ratio);
+    }
+    let (training_data, validation_data) = market_data.split_at(split_index);
+    info!(
+        "Split data: {} training samples, {} validation samples.",
+        training_data.len(),
+        validation_data.len()
+    );
+
+    // --- 4. Initialize Trainer --- (Handles its own logging)
+    let mut trainer = ModelTrainer::new(ml_config.clone())
+        .context("Failed to initialize ModelTrainer")?;
+    info!("Model trainer initialized.");
+
+    // --- 5. Train Model --- (Handles its own logging)
+    info!("Starting training...");
+    trainer.train(training_data, validation_data)
+        .await
+        .context("Model training failed")?;
+    info!("Training finished.");
+
+    // --- 6. Save Model --- (Handles its own logging)
+    info!("Saving trained model to: {}", model_output_path.display());
+    trainer.save(&model_output_path)
+        .context(format!("Failed to save model to {}", model_output_path.display()))?;
+    info!("Model saved successfully.");
+
+    // --- 7. Evaluate Model --- 
+    info!("Starting model evaluation on validation set...");
+    if validation_data.is_empty() {
+        warn!("Validation data set is empty, skipping evaluation.");
+    } else {
+        // Prepare validation data
+        // TODO: Get horizon/threshold properly if needed for evaluation prep
+        // Using defaults similar to ModelTrainer::train for now
+        let prediction_horizon = 60; // Example: Needs to be consistent or configurable
+        let threshold = 0.005;      // Example: Needs to be consistent or configurable
+        let (val_features, val_labels) = prepare_features_and_labels(
+            validation_data, 
+            ml_config.min_data_points, 
+            prediction_horizon, 
+            threshold
+        )
+            .context("Failed to prepare validation features and labels")?;
+
+        if val_features.is_empty() {
+            warn!("Prepared validation features are empty (likely due to insufficient data for lookahead/window), skipping evaluation.");
+        } else {
+            let num_val_samples = val_features.len();
+            info!("Prepared {} samples for validation.", num_val_samples);
+            
+            // Create a new trainer instance to load the saved model
+            let mut eval_trainer = ModelTrainer::new(ml_config.clone())
+                 .context("Failed to initialize ModelTrainer for evaluation")?;
+            
+            eval_trainer.load(&model_output_path)
+                 .context(format!("Failed to load saved model from {} for evaluation", model_output_path.display()))?;
+
+            let device = get_device(); // Get the device (CPU/GPU) used by the trainer
+
+            // Convert validation data to tensors
+            let val_features_tensor = Tensor::f_from_slice(&val_features.concat())?
+                .view([num_val_samples as i64, -1]) // Reshape: [num_samples, features_per_sample]
+                .to_kind(Kind::Float) // Ensure Float type
+                .to(device);
+            let val_labels_tensor = Tensor::f_from_slice(&val_labels.concat())?
+                .view([num_val_samples as i64, -1]) // Reshape: [num_samples, num_classes]
+                .to_kind(Kind::Float) // Ensure Float type
+                .to(device);
+
+            // Run inference (no_grad to disable gradient calculation)
+            let predictions = tch::no_grad(|| {
+                // Use the public getter for the model
+                eval_trainer.model().forward_t(&val_features_tensor, false) // Set train=false for evaluation mode
+            });
+            
+            // Calculate accuracy
+            let predicted_classes = predictions.argmax(1, false); // Get index of max logit (predicted class)
+            let true_classes = val_labels_tensor.argmax(1, false); // Get index of true class
+            
+            let correct_predictions = predicted_classes.eq_tensor(&true_classes).sum(Kind::Int64);
+            let total_predictions = num_val_samples as i64;
+            
+            let accuracy = correct_predictions.int64_value(&[]) as f64 / total_predictions as f64;
+            
+            info!("Validation Accuracy: {:.4} ({} / {})", accuracy, correct_predictions.int64_value(&[]), total_predictions);
+            
+            // TODO: Add more metrics (Precision, Recall, F1, Confusion Matrix)
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

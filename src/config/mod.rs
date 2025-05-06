@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::fs;
 use anyhow::Result;
-use crate::ml::{ModelArchitecture, LossFunction};
+use crate::ml::config::MLConfig;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -66,26 +66,6 @@ pub struct SecurityConfig {
     pub keychain_service_name: String,
     pub solana_key_username: String,
     pub ton_key_username: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MLConfig {
-    pub architecture: ModelArchitecture,
-    pub loss_function: LossFunction,
-    pub input_size: i64,
-    pub hidden_size: i64,
-    pub output_size: i64,
-    pub learning_rate: f64,
-    pub model_path: String,
-    pub confidence_threshold: f64,
-    pub training_batch_size: usize,
-    pub training_epochs: usize,
-    pub window_size: usize,
-    pub min_data_points: usize,
-    pub validation_split: f64,
-    pub early_stopping_patience: usize,
-    pub save_best_model: bool,
-    pub evaluation_window_size: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

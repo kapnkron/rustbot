@@ -89,13 +89,14 @@ impl ModelArchitecture {
     }
 }
 
+/// Attempts to get the CUDA device if available, otherwise falls back to CPU.
 pub fn get_device() -> Device {
-    // Only check for CUDA if the "cuda" feature is enabled AND CUDA is available
-    if cfg!(feature = "cuda") && tch::Cuda::is_available() {
-        log::info!("CUDA feature enabled and CUDA device found. Using CUDA:0.");
-        Device::Cuda(0)
+    // Rely solely on tch's built-in check, which depends on build-time detection
+    if tch::utils::has_cuda() {
+        log::info!("CUDA detected by tch, attempting to use GPU.");
+        Device::cuda_if_available()
     } else {
-        log::info!("CUDA not available or feature not enabled. Using CPU.");
+        log::info!("CUDA not detected by tch or build script, using CPU.");
         Device::Cpu
     }
 } 

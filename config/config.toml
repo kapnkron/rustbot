@@ -42,7 +42,7 @@ base_token_mint = "So11111111111111111111111111111111111111112" # Placeholder (S
 quote_token_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" # Placeholder (USDC) - Update required
 base_token_decimals = 9 # Placeholder (SOL) - Update required
 quote_token_decimals = 6 # Placeholder (USDC) - Update required
-slippage_bps = 50 # Example: 0.5% slippage
+slippage_bps = 50 # Example: 0.5% slippage 
 
 # Adding placeholders for other missing root config sections/fields based on src/config/mod.rs
 
@@ -60,30 +60,26 @@ enable_notifications = true
 
 [ml]
 # Direct fields of MLConfig
-loss_function = "MSE" 
-input_size = 9 
-hidden_size = 20 
-output_size = 2 
+loss_function = "CrossEntropy"
 learning_rate = 0.001
-model_path = "path/to/model.onnx"
-confidence_threshold = 0.7
-training_batch_size = 32
+model_path = "models/trading_model.ot"
+window_size = 60 # Example: Use last 60 data points (e.g., 1 hour if 1-min data)
+min_data_points = 26 # Minimum history needed for preprocessor (e.g., for MACD). Must be >= 26
+training_batch_size = 64
 training_epochs = 100
-window_size = 1
-min_data_points = 1
-validation_split = 0.2
-early_stopping_patience = 5
+early_stopping_patience = 10
 save_best_model = true
-evaluation_window_size = 100
+validation_split = 0.15 # Use 15% of data for validation
+evaluation_window_size = 120 # Example: Evaluate performance over last 120 predictions
 
-# Nested architecture field
+# Nested Model architecture configuration
 [ml.architecture]
-input_size = 9 # Corresponds to ModelArchitecture.input_size
-hidden_size = 20 # Corresponds to ModelArchitecture.hidden_size
-output_size = 2 # Corresponds to ModelArchitecture.output_size
-num_layers = 2
-dropout = 0.1 
-activation = "ReLU" 
+input_size = 11 # Number of input features from preprocessor
+hidden_size = 64
+output_size = 2 # Buy/Sell probabilities
+num_layers = 3
+dropout = 0.1
+activation = "ReLU"
 
 [solana]
 rpc_url = "https://api.mainnet-beta.solana.com" # Example Solana RPC URL

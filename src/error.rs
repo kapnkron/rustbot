@@ -10,10 +10,12 @@ use std::io;
 use tch::TchError;
 use serde_urlencoded::de::Error as SerdeUrlencodedError;
 use crate::ml::config::MLConfigError;
-use solana_client::client_error::ClientError;
+use solana_client::client_error::ClientError as SolanaClientError;
 use solana_sdk::signer::keypair::SignerError;
 use solana_program::program_error::ProgramError;
 use keyring::Error as KeyringError;
+use bincode;
+use csv;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -71,6 +73,8 @@ pub enum Error {
     DataError(String),
     #[error("Solana program error: {0}")]
     SolanaProgramError(#[from] ProgramError),
+    #[error("CSV processing error: {0}")]
+    CsvError(#[from] csv::Error),
 }
 
 impl From<serde_json::Error> for Error {
@@ -126,8 +130,8 @@ impl From<crate::api::ApiError> for Error {
     }
 }
 
-impl From<ClientError> for Error {
-    fn from(err: ClientError) -> Self {
+impl From<SolanaClientError> for Error {
+    fn from(err: SolanaClientError) -> Self {
         Error::SolanaRpcError(err.to_string())
     }
 }
