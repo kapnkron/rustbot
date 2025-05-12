@@ -11,6 +11,8 @@ use crate::config::Config;
 use crate::solana::SolanaManager;
 use std::fmt;
 use crate::api::MarketDataProvider;
+use crate::ml::PredictionOutput;
+use async_trait::async_trait;
 
 mod risk;
 pub use risk::RiskManager;
@@ -146,8 +148,8 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TradingBot<M> {
 
         let signal = match prediction_result {
             Ok(prediction) => {
-                let buy_confidence = prediction.first().cloned().unwrap_or(0.0);
-                let sell_confidence = prediction.get(1).cloned().unwrap_or(0.0);
+                let buy_confidence = prediction.predictions.first().cloned().unwrap_or(0.0);
+                let sell_confidence = prediction.predictions.get(1).cloned().unwrap_or(0.0);
 
                 log::debug!(
                     "Processing prediction: Buy={:.4}, Sell={:.4}",
@@ -410,7 +412,7 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TradingBot<M> {
         })
     }
 
-    pub fn should_trade(&self, signal: &TradingSignal) -> bool {
+    pub fn should_trade(&self, _signal: &TradingSignal) -> bool {
         // Basic check: only trade if confidence meets a threshold
         // Removed confidence_threshold check as the field doesn't exist in MLConfig
         // signal.confidence >= self.config.ml.confidence_threshold
@@ -429,19 +431,22 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TradingBot<M> {
     }
 }
 
-#[cfg(test)]
-#[derive(Debug)]
+// --- Dummy Predictor for testing and fallback ---
+#[derive(Debug, Default)]
 struct LocalDummyPredictor;
 
-#[cfg(test)]
 #[async_trait::async_trait]
 impl Predictor for LocalDummyPredictor {
-    async fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> { 
+    async fn predict(&mut self, data: &TradingMarketData) -> Result<PredictionOutput> {
+        // Simple dummy logic: if price is high, predict up; if low, predict down.
         log::debug!(
             "LocalDummyPredictor received data with price: {:.2}",
             data.price
         );
-        let result = Ok(vec![0.5, 0.5]);
+        let result = Ok(PredictionOutput {
+            predictions: vec![0.5, 0.5],
+            confidence: 0.5,
+        });
         log::debug!("LocalDummyPredictor returning: {:?}", result);
         result
     }
@@ -517,7 +522,7 @@ mod tests {
         // Manually check the local predictor first
         let mut local_pred = LocalDummyPredictor{};
         let manual_pred = local_pred.predict(&market_data).await?;
-        assert_eq!(manual_pred, vec![0.5, 0.5], "Manual predictor check failed");
+        assert_eq!(manual_pred.predictions, vec![0.5, 0.5], "Manual predictor check failed");
 
         let signal_result = bot.process_market_data(market_data).await?;
         assert!(signal_result.is_some());

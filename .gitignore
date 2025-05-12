@@ -57,3 +57,6 @@ project_backup_*.tar.gz
 cpp_cuda_check/build/
 cpp_cuda_check/cuda_check
 cpp_cuda_check/cuda_check_stable
+
+# Test fixtures
+/tests/fixtures/

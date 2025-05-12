@@ -1,10 +1,11 @@
-use tch::{Device, nn};
+/// Contains the definition of the model architecture, activation functions, and loss functions.
+// use tch::{Device, nn}; // Removed tch
 use serde::{Deserialize, Serialize};
-use crate::error::Result;
+// use crate::error::Result; // Result is not used if create_model is removed
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelArchitecture {
-    pub input_size: i64,
+    pub input_size: i64, // These fields can still be useful for config
     pub hidden_size: i64,
     pub output_size: i64,
     pub num_layers: usize,
@@ -44,6 +45,7 @@ impl ModelArchitecture {
         }
     }
 
+    /* // Commenting out tch-dependent create_model
     pub fn create_model(&self, vs: &nn::Path) -> Result<nn::Sequential> {
         let mut seq = nn::seq();
         let activation = self.activation.clone();
@@ -87,8 +89,10 @@ impl ModelArchitecture {
         
         Ok(seq)
     }
+    */
 }
 
+/* // Commenting out tch-dependent get_device
 /// Attempts to get the CUDA device if available, otherwise falls back to CPU.
 pub fn get_device() -> Device {
     // Rely solely on tch's built-in check, which depends on build-time detection
@@ -99,4 +103,5 @@ pub fn get_device() -> Device {
         log::info!("CUDA not detected by tch or build script, using CPU.");
         Device::Cpu
     }
-} 
+}
+*/ 

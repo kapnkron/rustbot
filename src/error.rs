@@ -7,15 +7,15 @@ use anyhow;
 use prometheus;
 use ring;
 use std::io;
-use tch::TchError;
 use serde_urlencoded::de::Error as SerdeUrlencodedError;
 use crate::ml::config::MLConfigError;
 use solana_client::client_error::ClientError as SolanaClientError;
-use solana_sdk::signer::keypair::SignerError;
+use solana_sdk::signer::SignerError;
 use solana_program::program_error::ProgramError;
 use keyring::Error as KeyringError;
 use bincode;
 use csv;
+use solana_sdk::transaction::TransactionError;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -71,7 +71,7 @@ pub enum Error {
     MLWarmupRequired(String),
     #[error("Data error: {0}")]
     DataError(String),
-    #[error("Solana program error: {0}")]
+    #[error("Solana Program Error: {0}")]
     SolanaProgramError(#[from] ProgramError),
     #[error("CSV processing error: {0}")]
     CsvError(#[from] csv::Error),
@@ -104,12 +104,6 @@ impl From<prometheus::Error> for Error {
 impl From<ring::error::Unspecified> for Error {
     fn from(err: ring::error::Unspecified) -> Self {
         Error::SecurityError(format!("{:?}", err))
-    }
-}
-
-impl From<TchError> for Error {
-    fn from(err: TchError) -> Self {
-        Error::MLError(err.to_string())
     }
 }
 

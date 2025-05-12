@@ -12,7 +12,7 @@ use trading_bot::monitoring::thresholds::{ThresholdConfig, SystemThresholds, Per
 use trading_bot::config::Config;
 use trading_bot::trading::TradingBot;
 use trading_bot::api::MarketDataCollector;
-use trading_bot::ml::{TradingModel, ModelConfig, Predictor};
+use trading_bot::ml::{PythonPredictor, Predictor};
 use trading_bot::telegram::TelegramBot;
 use trading_bot::cli::Cli;
 
@@ -42,19 +42,14 @@ async fn main() -> Result<()> {
     ));
     info!("Market data collector initialized.");
 
-    // Create the actual TradingModel instance
-    let model_config = ModelConfig::new(
-        config.ml.architecture.clone(),
-        config.ml.loss_function.clone(),
-        config.ml.learning_rate,
-        config.ml.model_path.clone(),
-        config.ml.window_size,
-        config.ml.min_data_points,
-    )?;
-    let trading_model = TradingModel::new(model_config)?;
-    // Potentially load weights here if needed: trading_model.load(...) 
-    let model_predictor: Arc<Mutex<dyn Predictor + Send>> = Arc::new(Mutex::new(trading_model));
-    info!("Trading model initialized.");
+    // Create the PythonPredictor instance
+    let python_predictor = PythonPredictor::new(
+        config.ml.model_path.clone(),        // Path to the .pt or .onnx model file
+        config.ml.scaler_path.clone(),       // Path to the .pkl scaler file
+        config.ml.python_script_path.clone() // Path to the Python inference script
+    );
+    let model_predictor: Arc<Mutex<dyn Predictor + Send>> = Arc::new(Mutex::new(python_predictor));
+    info!("Python predictor initialized.");
 
     // Wrap the collector in Arc<Mutex<M>>
     let collector_mutex = Arc::new(Mutex::new(market_data_collector.as_ref().clone()));

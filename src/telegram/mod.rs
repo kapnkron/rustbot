@@ -5,6 +5,8 @@ use crate::error::Result;
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use teloxide::utils::command::BotCommands;
+use teloxide::dispatching::repls::CommandReplExt;
+use teloxide::requests::ResponseResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::error;
@@ -57,11 +59,11 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
 
         let telegram_bot_clone = self.clone();
 
-        Command::repl(bot, move |bot: Bot, msg: Message, cmd: Command| {
-            let _bot = bot;
-            let telegram_bot = telegram_bot_clone.clone();
+        Command::repl(bot, move |b: Bot, msg: Message, cmd: Command| {
+            let _bot_in_handler = b;
+            let handler_instance = telegram_bot_clone.clone();
             async move {
-                if let Err(e) = telegram_bot.handle_command(msg, cmd).await {
+                if let Err(e) = handler_instance.handle_command(msg, cmd).await {
                     error!("Error handling command: {}", e);
                 }
                 Ok(())

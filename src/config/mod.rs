@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::fs;
 use anyhow::Result;
-use crate::ml::config::MLConfig;
+use crate::ml::architecture::ModelArchitecture;
+pub use crate::ml::config::MLConfig;
+use crate::ml::LossFunction;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {

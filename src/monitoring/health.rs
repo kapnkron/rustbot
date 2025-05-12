@@ -1,7 +1,7 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use sysinfo::{System, SystemExt, CpuExt, DiskExt};
+use sysinfo::{System, Disks};
 use chrono::{DateTime, Utc};
 use std::sync::atomic::Ordering;
 
@@ -28,22 +28,25 @@ pub struct HealthConfig {
 
 pub struct HealthMonitor {
     config: HealthConfig,
-    system: System,
+    system_info: System,
+    disks: Disks,
     metrics: RwLock<HealthMetrics>,
     error_count: RwLock<u32>,
     total_requests: RwLock<u32>,
-    // last_check: RwLock<Instant>,
     error_rate: std::sync::atomic::AtomicU64,
 }
 
 impl HealthMonitor {
     pub fn new(config: HealthConfig) -> Self {
-        let mut system = System::new_all();
-        system.refresh_all();
+        let mut system_info = System::new_all();
+        system_info.refresh_all();
+
+        let disks = Disks::new_with_refreshed_list();
 
         Self {
             config,
-            system,
+            system_info,
+            disks,
             metrics: RwLock::new(HealthMetrics {
                 timestamp: Utc::now(),
                 api_status: true,
@@ -62,10 +65,11 @@ impl HealthMonitor {
     }
 
     pub async fn update_metrics(&mut self) -> Result<()> {
-        self.system.refresh_all();
+        self.system_info.refresh_cpu();
+        self.system_info.refresh_memory();
 
-        let memory_usage = self.system.used_memory() as f64 / self.system.total_memory() as f64 * 100.0;
-        let cpu_usage = self.system.global_cpu_info().cpu_usage() as f64;
+        let memory_usage = self.system_info.used_memory() as f64 / self.system_info.total_memory() as f64 * 100.0;
+        let cpu_usage = self.system_info.global_cpu_info().cpu_usage() as f64;
 
         let error_rate = {
             let error_count = *self.error_count.read().await;
@@ -115,18 +119,21 @@ impl HealthMonitor {
     }
 
     pub async fn get_metrics(&mut self) -> Result<HealthMetrics> {
-        self.system.refresh_all();
+        self.system_info.refresh_cpu();
+        self.system_info.refresh_memory();
+
+        self.disks.refresh_list();
 
         Ok(HealthMetrics {
-            cpu_usage: self.system.global_cpu_info().cpu_usage() as f64,
-            memory_usage: (self.system.used_memory() as f64 / self.system.total_memory() as f64) * 100.0,
+            cpu_usage: self.system_info.global_cpu_info().cpu_usage() as f64,
+            memory_usage: (self.system_info.used_memory() as f64 / self.system_info.total_memory() as f64) * 100.0,
             disk_usage: self.get_disk_usage()?,
             error_rate: self.error_rate.load(Ordering::Relaxed) as f64,
             api_status: self.check_api_status().await?,
             db_status: self.check_db_status().await?,
             timestamp: Utc::now(),
             trading_status: true,
-            last_error: None,
+            last_error: self.metrics.read().await.last_error.clone(),
         })
     }
 
@@ -140,28 +147,23 @@ impl HealthMonitor {
         metrics.trading_status
     }
 
-    fn get_disk_usage(&mut self) -> Result<f64> {
-        self.system.refresh_disks();
-        
-        let total_space: u64 = self.system.disks().iter().map(|d| d.total_space()).sum();
-        let used_space: u64 = self.system.disks().iter().map(|d| d.available_space()).sum();
+    fn get_disk_usage(&self) -> Result<f64> {
+        let total_space: u64 = self.disks.list().iter().map(|d| d.total_space()).sum();
+        let available_space: u64 = self.disks.list().iter().map(|d| d.available_space()).sum();
         
         if total_space == 0 {
             return Ok(0.0);
         }
         
-        Ok((1.0 - (used_space as f64 / total_space as f64)) * 100.0)
+        let used_space = total_space.saturating_sub(available_space);
+        Ok((used_space as f64 / total_space as f64) * 100.0)
     }
 
     async fn check_api_status(&self) -> Result<bool> {
-        // For now, we'll just return true
-        // In a real implementation, this would check the API connection
         Ok(true)
     }
 
     async fn check_db_status(&self) -> Result<bool> {
-        // For now, we'll just return true
-        // In a real implementation, this would check the database connection
         Ok(true)
     }
 }
@@ -181,14 +183,11 @@ mod tests {
 
         let monitor = HealthMonitor::new(config);
         
-        // Test initial state
         assert!(monitor.is_healthy().await);
         
-        // Test error recording
         monitor.record_error("Test error".to_string()).await;
         monitor.record_request().await;
         
-        // Test status updates
         monitor.set_api_status(false).await;
         assert!(!monitor.is_healthy().await);
         

@@ -5,6 +5,7 @@ use super::super::trading::{TradingMarketData, Trade, Position, TradingSignal, S
 use super::super::api::types; // Import for types::Quote, types::USDData
 use chrono::{Utc, TimeZone};
 use super::super::ml::Predictor;
+use crate::ml::PredictionOutput;
 use super::super::error::Result;
 use async_trait::async_trait;
 use log;
@@ -54,12 +55,10 @@ pub fn create_test_config() -> Config {
                 num_layers: 2, dropout: Some(0.1), activation: Activation::ReLU,
             },
             loss_function: LossFunction::MSE,
-            input_size: 9, // Should match architecture
-            hidden_size: 20, // Should match architecture
-            output_size: 2, // Should match architecture
             learning_rate: 0.001,
-            model_path: "model.pt".to_string(),
-            confidence_threshold: 0.7,
+            model_path: "test_model.pt".to_string(),
+            scaler_path: "test_scaler.pkl".to_string(),
+            python_script_path: "test_script.py".to_string(),
             training_batch_size: 32,
             training_epochs: 100,
             window_size: 10, // Reasonable window size
@@ -147,12 +146,13 @@ pub fn create_mock_market_data_collector() -> MockMarketDataCollector {
 }
 
 // Dummy Predictor for testing
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DummyPredictor;
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Predictor for DummyPredictor {
-    async fn predict(&mut self, data: &TradingMarketData) -> Result<Vec<f64>> { 
+    async fn predict(&mut self, data: &TradingMarketData) -> Result<PredictionOutput> {
+        // info!("DummyPredictor received data for symbol: {}, price: {}", data.symbol, data.price);
         // Added logging
         log::debug!(
             "DummyPredictor received data with price: {:.2}",
@@ -160,11 +160,11 @@ impl Predictor for DummyPredictor {
         );
 
         let result = if data.price > 105.0 {
-            Ok(vec![0.9, 0.1])
+            Ok(PredictionOutput::new(vec![0.9, 0.1], 0.9))
         } else if data.price < 95.0 {
-            Ok(vec![0.1, 0.9])
+            Ok(PredictionOutput::new(vec![0.1, 0.9], 0.9))
         } else {
-            Ok(vec![0.5, 0.5])
+            Ok(PredictionOutput::new(vec![0.5, 0.5], 0.5))
         };
 
         // Added logging

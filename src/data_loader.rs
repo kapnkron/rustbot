@@ -36,7 +36,7 @@ pub fn load_market_data_from_csv(file_path: &Path) -> Result<Vec<MarketData>> {
     let mut skipped_header = false;
 
     // Get the headers separately first to handle the offset
-    let headers = rdr.headers()?.clone();
+    let _headers = rdr.headers()?.clone();
 
     for (line_num, result) in rdr.records().enumerate() {
         // Skip the first actual data row (which corresponds to header row 2 in the file)
@@ -69,11 +69,11 @@ pub fn load_market_data_from_csv(file_path: &Path) -> Result<Vec<MarketData>> {
             }
         };
         // Convert milliseconds to DateTime<Utc>
-        let naive_dt = NaiveDateTime::from_timestamp_opt(timestamp_ms / 1000, (timestamp_ms % 1000) as u32 * 1_000_000);
-        let timestamp = match naive_dt {
-            Some(ndt) => DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc),
+        let timestamp_opt = DateTime::from_timestamp_millis(timestamp_ms);
+        let timestamp = match timestamp_opt {
+            Some(dt) => dt,
             None => {
-                 warn!("Skipping record on line {}: Invalid timestamp value '{}'", line_num + 3, timestamp_ms);
+                 warn!("Skipping record on line {}: Invalid timestamp value '{}' for DateTime::from_timestamp_millis", line_num + 3, timestamp_ms);
                  continue;
             }
         };

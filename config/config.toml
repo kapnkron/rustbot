@@ -62,7 +62,9 @@ enable_notifications = true
 # Direct fields of MLConfig
 loss_function = "CrossEntropy"
 learning_rate = 0.001
-model_path = "models/trading_model.ot"
+model_path = "models/trading_model.pt"
+scaler_path = "models/scaler.pkl"
+python_script_path = "scripts/ml_inference.py"
 window_size = 60 # Example: Use last 60 data points (e.g., 1 hour if 1-min data)
 min_data_points = 26 # Minimum history needed for preprocessor (e.g., for MACD). Must be >= 26
 training_batch_size = 64
