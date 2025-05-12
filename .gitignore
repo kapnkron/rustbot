@@ -47,3 +47,13 @@ Thumbs.db
 
 # Backup files
 backup_*.tar.gz
+project_backup_*.tar.gz
+
+# Model files and scalers
+*.pt
+*.pkl
+
+# Build artifacts
+cpp_cuda_check/build/
+cpp_cuda_check/cuda_check
+cpp_cuda_check/cuda_check_stable
