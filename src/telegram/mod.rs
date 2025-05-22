@@ -6,11 +6,10 @@ use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use teloxide::utils::command::BotCommands;
 use teloxide::dispatching::repls::CommandReplExt;
-use teloxide::requests::ResponseResult;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::error;
-use crate::api::MarketDataProvider;
+use std::collections::VecDeque;
 
 const RECENT_TRADES_LIMIT: usize = 5;
 
@@ -29,39 +28,37 @@ pub enum Command {
     Status,
     #[command(description = "Get backtesting results")]
     Backtest,
+    #[command(description = "Show recent bot actions/logs")]
+    Log,
     #[command(description = "Display this help message")]
     Help,
 }
 
-#[derive(Clone)]
-pub struct TelegramBot<M: MarketDataProvider + Clone + Send + Sync + 'static> {
+pub struct TelegramBot {
     bot: Bot,
     chat_id: ChatId,
-    trading_bot: Arc<TradingBot<M>>,
+    trading_bot: Arc<TradingBot>,
     dashboard: Arc<Mutex<Dashboard>>,
+    log: Arc<Mutex<VecDeque<String>>>,
 }
 
-impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
-    pub fn new(bot_token: String, chat_id: String, trading_bot: Arc<TradingBot<M>>, dashboard: Dashboard) -> Self {
+impl TelegramBot {
+    pub fn new(bot_token: String, chat_id: String, trading_bot: Arc<TradingBot>, dashboard: Dashboard) -> Self {
         Self {
             bot: Bot::new(bot_token),
             chat_id: ChatId(chat_id.parse().expect("Invalid chat ID")),
             trading_bot,
             dashboard: Arc::new(Mutex::new(dashboard)),
+            log: Arc::new(Mutex::new(VecDeque::with_capacity(20))),
         }
     }
 
-    pub async fn start(&self) -> Result<()> {
-        let _chat_id = self.chat_id;
-        let _trading_bot = self.trading_bot.clone();
-        let _dashboard = self.dashboard.clone();
+    pub async fn start(self: Arc<Self>) -> Result<()> {
         let bot = self.bot.clone();
-
-        let telegram_bot_clone = self.clone();
-
+        let handler_instance = self.clone();
         Command::repl(bot, move |b: Bot, msg: Message, cmd: Command| {
             let _bot_in_handler = b;
-            let handler_instance = telegram_bot_clone.clone();
+            let handler_instance = handler_instance.clone();
             async move {
                 if let Err(e) = handler_instance.handle_command(msg, cmd).await {
                     error!("Error handling command: {}", e);
@@ -70,7 +67,6 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
             }
         })
         .await;
-
         Ok(())
     }
 
@@ -232,23 +228,7 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
                     .await?;
             }
             Command::MarketData => {
-                let trading_bot = self.trading_bot.clone();
-                if let Ok(data) = trading_bot.get_market_data("").await {
-                    let message = format!(
-                        "📊 *Market Data*\n\n\
-                        Price: ${:.2}\n\
-                        Volume: {:.2}\n\
-                        24h Change: {:.2}%",
-                        data.price,
-                        data.volume,
-                        data.price_change_24h
-                    );
-                    self.bot.send_message(msg.chat.id, message)
-                        .parse_mode(ParseMode::MarkdownV2)
-                        .await?;
-                } else {
-                    self.bot.send_message(msg.chat.id, "Failed to fetch market data").await?;
-                }
+                self.bot.send_message(msg.chat.id, "Market data command is not available. Real-time market data is not fetched by the bot at this time.").await?;
             }
             Command::Positions => {
                 let trading_bot = self.trading_bot.clone();
@@ -334,6 +314,15 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
                     self.bot.send_message(msg.chat.id, "Failed to fetch backtest results").await?;
                 }
             }
+            Command::Log => {
+                let log = self.log.lock().await;
+                if log.is_empty() {
+                    self.bot.send_message(msg.chat.id, "No recent actions.").await?;
+                } else {
+                    let log_text = log.iter().rev().take(20).cloned().collect::<Vec<_>>().join("\n");
+                    self.bot.send_message(msg.chat.id, format!("Recent actions:\n{}", log_text)).await?;
+                }
+            }
             Command::Help => {
                 let help_text = "Available commands:\n\
                     /start - Start the bot\n\
@@ -342,7 +331,8 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
                     /positions - List current positions\n\
                     /history - View trade history\n\
                     /status - Check bot status\n\
-                    /backtest - Run backtest";
+                    /backtest - Run backtest\n\
+                    /log - Show recent bot actions";
                 self.bot.send_message(msg.chat.id, help_text).await?;
             }
         }
@@ -355,5 +345,11 @@ impl<M: MarketDataProvider + Clone + Send + Sync + 'static> TelegramBot<M> {
             .parse_mode(ParseMode::Html)
             .await?;
         Ok(())
+    }
+
+    pub async fn push_log(&self, entry: String) {
+        let mut log = self.log.lock().await;
+        if log.len() == 20 { log.pop_front(); }
+        log.push_back(entry);
     }
 } 

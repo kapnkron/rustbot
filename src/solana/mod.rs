@@ -432,14 +432,19 @@ impl SolanaManager {
 mod tests {
     use super::*;
     use crate::config::SolanaConfig;
-    use crate::tests::common::create_test_config;
+    use crate::config::Config;
     use solana_sdk::signer::Signer;
     use std::env;
     use dotenv::dotenv;
+    use std::path::Path;
 
     fn setup_test_environment() -> (SolanaManager, SolanaConfig) {
         dotenv().ok(); 
-        let config = create_test_config();
+        let config_path_str = "config/config.toml";
+        let config_path = Path::new(config_path_str);
+        let config = Config::load(config_path)
+            .expect(&format!("Failed to load test config from {}. Ensure the file exists or specify a test-specific one.", config_path_str));
+        
         let solana_config = config.solana.clone();
         let security_config = config.security.clone();
         let manager = SolanaManager::new(solana_config.clone(), &security_config).expect("Failed to create SolanaManager");

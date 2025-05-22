@@ -18,6 +18,7 @@ pub mod services;
 pub mod solana;
 pub mod cli;
 pub mod data_loader;
+pub mod ml_api_adapter;
 
 pub use error::{Error, Result};
 

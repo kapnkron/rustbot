@@ -211,27 +211,43 @@ class Backtester:
         
         return metrics
 
-def main():
+def train_and_backtest(
+    train_path: str = 'data/processed/train_data.csv',
+    test_path: str = 'data/processed/test_data.csv',
+    model_dir: str = 'models'
+) -> dict:
+    """
+    Trains the model and runs backtesting. Returns a dictionary with results and paths.
+    """
     # Load data
-    train_data = pd.read_csv('data/processed/train_data.csv', index_col=0, parse_dates=True)
-    test_data = pd.read_csv('data/processed/test_data.csv', index_col=0, parse_dates=True)
+    train_data = pd.read_csv(train_path, index_col=0, parse_dates=True)
+    test_data = pd.read_csv(test_path, index_col=0, parse_dates=True)
     
     # Split training data into train and validation
     val_size = int(len(train_data) * 0.2)
-    train_data, val_data = train_data.iloc[:-val_size], train_data.iloc[-val_size:]
+    train_split, val_data = train_data.iloc[:-val_size], train_data.iloc[-val_size:]
     
     # Train model
-    trainer = ModelTrainer()
-    model = trainer.train_model(train_data, val_data)
+    trainer = ModelTrainer(model_dir=model_dir)
+    model = trainer.train_model(train_split, val_data)
     
     # Run backtesting
     backtester = Backtester(model, trainer.scaler_X, trainer.scaler_y)
     metrics = backtester.run_backtest(test_data)
     
-    # Log results
-    logging.info("Backtesting Results:")
-    for metric, value in metrics.items():
-        logging.info(f"{metric}: {value:.4f}")
+    # Save model and scalers (again, to get the latest timestamped versions)
+    trainer.save_model(model, 'final_model.pt')
+    
+    # Return results
+    return {
+        'train_path': train_path,
+        'test_path': test_path,
+        'model_dir': model_dir,
+        'metrics': metrics
+    }
 
 if __name__ == "__main__":
-    main() 
+    results = train_and_backtest()
+    logging.info("Train and backtest results:")
+    for k, v in results.items():
+        logging.info(f"{k}: {v}") 

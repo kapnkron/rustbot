@@ -112,25 +112,34 @@
   - [x] Add model validation
   - [x] Set up model registry
 - [x] Model Operations
-  - [x] Add performance monitoring
+  - [/] Add performance monitoring // Python backtester provides metrics; live monitoring TBD
   - [x] Implement A/B testing
   - [x] Set up model retraining
+- [x] Python ML Module Development
+  - [x] Data Fetching Pipeline (Birdeye/CoinGecko)
+  - [x] Feature Engineering for Train/Test sets (`add_features.py`)
+  - [x] Neural Network Training Pipeline (`train_model.py` - log-transform, RobustScaler)
+  - [x] Model State & Scaler Serialization (PyTorch models, scikit-learn scalers)
+  - [x] Asset-Aware Backtesting Framework (`backtest_nn_model.py`)
+  - [x] Risk Management Parameterization in Backtester (risk %, price thresholds, caps)
+  - [x] Prediction Clipping in Backtester (based on training distribution)
 
 ## Refactoring & Cleanup
 - [x] Refactor `src/bin/setup_key.rs` to use command-line args and file inputs instead of interactive prompts and keyring.
 - [x] Remove YubiKey integration code (src/security/yubikey.rs, config, SecurityManager references).
 
 ## Progress Tracking
-- Current Focus: Testing Infrastructure, ML Integration
+- Current Focus: ML Integration with Rust Core, Finalizing Rust Trading Logic
 - Next Up: High Priority / Blocking Tasks
 - Completed Items:
   - Fixed type mismatch in main.rs
   - Fixed tokio macro build issue
   - Completed Code Cleanup section (Imports, Variables, Visibility)
   - Migrated ML functionality to Python with PyTorch
-  - Implemented data fetching, model training, and inference pipelines
-  - Added multi-target prediction capability (price, direction, big moves)
+  - Implemented data fetching, model training, and inference pipelines // Covered by more detail below
+  - Added multi-target prediction capability (price, direction, big moves) // Retained, but specific focus was price
   - Pushed ML implementation changes to GitHub repository
+  - Developed and refined Python ML pipeline for price prediction including data fetching, feature engineering, model training, and asset-aware backtesting.
 
 ## Notes
 - Priority order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
@@ -142,6 +151,10 @@
 
 ## High Priority / Blocking
 
+*   **ML Integration:**
+    *   [ ] Design and implement communication/interaction between Rust core and Python ML module (e.g., IPC, API calls via a lightweight Python server, shared database/files for signals).
+    *   [ ] Rust core to trigger Python ML processes (data fetching, training, prediction).
+    *   [ ] Rust core to consume ML predictions/signals.
 *   **Solana Keychain Integration:**
     *   [ ] Determine the final strategy for storing/retrieving the Solana keypair (OS Keychain via `keyring`, config file, environment variable, hardware wallet integration?).
     *   [x] Implement and test the chosen key retrieval method for production builds (remove or refine the `#[cfg(test)]` workaround in `SolanaManager::get_keypair`).
@@ -150,12 +163,9 @@
     *   [ ] Implement the actual DEX interaction logic within `SolanaManager::execute_swap` (e.g., using Jupiter SDK/API).
     *   [ ] Implement `SolanaManager::get_quote` if needed for swaps.
     *   [ ] Review `SolanaManager::get_balance` and `execute_swap` for potential blocking calls and ensure async compatibility.
-
-## Testing & Refinement
-
 *   **Backtest (`test_backtest`):**
     *   [x] Implement mocking for `TradingModel` or use a dummy pre-trained model to reliably test trade execution logic.
-    *   [ ] Re-enable the `assert!(result.total_trades > 0)` assertion.
+    *   [/] Re-enable the `assert!(result.total_trades > 0)` assertion. // Python backtester makes trades; Rust test needs update for ML integration
 *   **Secure Storage (`test_secure_storage`):**
     *   [ ] Investigate the root cause of the `ring::error::Unspecified` failure during test runs (potential entropy issues?) if running in constrained environments is expected.
     *   [ ] Decide whether to keep the `#[cfg(test)]` workaround or find a more robust solution.
@@ -171,7 +181,7 @@
 ## Feature Implementation
 
 *   **Trading Strategy:**
-    *   [x] Implement the actual logic for trading strategies using ML predictions.
+    *   [/] Implement the actual logic for trading strategies using ML predictions. // Python backtester implements a version; Rust core needs to consume ML signals and act.
 *   **API Client Completeness:**
     *   [ ] Implement the placeholder methods in API clients (`get_quote_from_symbol`, `get_exchanges`, etc.) if needed.
 *   **Monitoring:**

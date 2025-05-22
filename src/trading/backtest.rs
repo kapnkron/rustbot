@@ -1,7 +1,6 @@
 use crate::error::Result;
 use crate::trading::{TradingBot, Position, SignalType, TradingMarketData};
 use log::{info, error};
-use crate::api::MarketDataProvider;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use crate::api::MarketData;
@@ -32,16 +31,16 @@ pub struct Trade {
     pub pnl_percentage: f64,
 }
 
-pub struct Backtester<M: MarketDataProvider + Clone + Send + Sync + 'static> {
-    bot: TradingBot<M>,
+pub struct Backtester {
+    bot: TradingBot,
     initial_balance: f64,
     current_balance: f64,
     trades: Vec<Trade>,
     equity_curve: Vec<(DateTime<Utc>, f64)>,
 }
 
-impl<M: MarketDataProvider + Clone + Send + Sync + 'static> Backtester<M> {
-    pub fn new(bot: TradingBot<M>, initial_balance: f64) -> Self {
+impl Backtester {
+    pub fn new(bot: TradingBot, initial_balance: f64) -> Self {
         Self {
             bot,
             initial_balance,

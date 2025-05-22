@@ -1,3 +1,5 @@
+paper_trading = true
+
 [general]
 log_level = "info"
 data_dir = "data"
@@ -6,9 +8,7 @@ backup_dir = "backups"
 [api]
 # host = "127.0.0.1" # These seem to belong elsewhere or are old?
 # port = 8080      # These seem to belong elsewhere or are old?
-coingecko_api_key = "CG-JNDG8WRtEMbKJdWwYnpKsg1i"
-coinmarketcap_api_key = "c3fd3c4c-3d9d-4f07-bd28-1f7d19597e01"
-cryptodatadownload_api_key = "YOUR_CRYPTODATADOWNLOAD_KEY" # Placeholder - Update required
+ ml_api_base_url = "http://localhost:8000"
 
 [database]
 # path = "/var/lib/trading-bot/data/trading.db" # Remove path if url is used
@@ -52,10 +52,11 @@ max_position_size = 1000.0
 stop_loss_percentage = 0.02
 take_profit_percentage = 0.1
 trading_pairs = ["SOL/USDC"]
+paper_trading = true
 
 [telegram]
-bot_token = "YOUR_BOT_TOKEN"
-chat_id = "YOUR_CHAT_ID"
+bot_token = "8181890288:AAGqmSPEMhA8jUfBWkfTyAJV5RkS319Qae8"
+chat_id = "5870014144"
 enable_notifications = true
 
 [ml]

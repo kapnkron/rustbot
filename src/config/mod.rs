@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::fs;
 use anyhow::Result;
-use crate::ml::architecture::ModelArchitecture;
 pub use crate::ml::config::MLConfig;
-use crate::ml::LossFunction;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -17,13 +15,12 @@ pub struct Config {
     pub ml: MLConfig,
     pub solana: SolanaConfig,
     pub dex_trading: DexTradingConfig,
+    pub paper_trading: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApiConfig {
-    pub coingecko_api_key: String,
-    pub coinmarketcap_api_key: String,
-    pub cryptodatadownload_api_key: String,
+    pub ml_api_base_url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -33,6 +30,7 @@ pub struct TradingConfig {
     pub stop_loss_percentage: f64,
     pub take_profit_percentage: f64,
     pub trading_pairs: Vec<String>,
+    pub paper_trading: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

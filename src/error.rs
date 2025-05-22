@@ -15,7 +15,6 @@ use solana_program::program_error::ProgramError;
 use keyring::Error as KeyringError;
 use bincode;
 use csv;
-use solana_sdk::transaction::TransactionError;
 
 #[derive(Error, Debug)]
 pub enum Error {

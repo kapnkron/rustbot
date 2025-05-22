@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::{SystemTime};
 use serde::{Serialize, Deserialize};
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock};
 
 #[derive(Error, Debug)]
 pub enum PortfolioError {
@@ -51,18 +51,18 @@ pub struct PortfolioManager {
     performance_metrics: RwLock<PerformanceMetrics>,
 }
 
-#[derive(Debug, Default)]
-struct PerformanceMetrics {
+#[derive(Debug, Default, Clone)]
+pub struct PerformanceMetrics {
     total_return: f64,
-    sharpe_ratio: f64,
-    max_drawdown: f64,
-    win_rate: f64,
+    _sharpe_ratio: f64,
+    _max_drawdown: f64,
+    _win_rate: f64,
 }
 
 impl PortfolioManager {
     pub fn new(config: PortfolioConfig) -> Self {
         Self {
-            config,
+            config: config.clone(),
             positions: RwLock::new(HashMap::new()),
             balance: RwLock::new(config.initial_balance),
             performance_metrics: RwLock::new(PerformanceMetrics::default()),
@@ -71,10 +71,10 @@ impl PortfolioManager {
 
     pub async fn calculate_position_size(
         &self,
-        symbol: &str,
+        _symbol: &str,
         entry_price: f64,
         stop_loss: f64,
-    ) -> Result<f64, PortfolioError> {
+    ) -> std::result::Result<f64, PortfolioError> {
         let portfolio_value = self.get_portfolio_value().await?;
         let risk_amount = portfolio_value * self.config.risk_per_trade;
         let position_size_limit = portfolio_value * self.config.position_size_limit;
@@ -98,7 +98,7 @@ impl PortfolioManager {
         quantity: f64,
         entry_price: f64,
         side: PositionSide,
-    ) -> Result<(), PortfolioError> {
+    ) -> std::result::Result<(), PortfolioError> {
         let mut positions = self.positions.write().await;
         let mut balance = self.balance.write().await;
 
@@ -133,7 +133,7 @@ impl PortfolioManager {
         &self,
         symbol: &str,
         exit_price: f64,
-    ) -> Result<f64, PortfolioError> {
+    ) -> std::result::Result<f64, PortfolioError> {
         let mut positions = self.positions.write().await;
         let mut balance = self.balance.write().await;
 
@@ -152,7 +152,7 @@ impl PortfolioManager {
         }
     }
 
-    pub async fn get_portfolio_value(&self) -> Result<f64, PortfolioError> {
+    pub async fn get_portfolio_value(&self) -> std::result::Result<f64, PortfolioError> {
         let positions = self.positions.read().await;
         let balance = self.balance.read().await;
 
@@ -177,7 +177,7 @@ impl PortfolioManager {
     pub async fn rebalance_portfolio(
         &self,
         target_allocations: HashMap<String, f64>,
-    ) -> Result<(), PortfolioError> {
+    ) -> std::result::Result<(), PortfolioError> {
         let current_value = self.get_portfolio_value().await?;
         let positions = self.positions.read().await;
 
@@ -196,6 +196,18 @@ impl PortfolioManager {
         }
 
         Ok(())
+    }
+
+    pub async fn get_positions(&self) -> Vec<Position> {
+        self.positions.read().await.values().cloned().collect()
+    }
+
+    pub fn max_positions(&self) -> usize {
+        self.config.max_positions
+    }
+
+    pub fn stop_loss_percentage(&self) -> f64 {
+        self.config.stop_loss_percentage
     }
 }
 

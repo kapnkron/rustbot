@@ -3,7 +3,7 @@ use crate::api::types::{MarketData, Quote, USDData};
 use csv::ReaderBuilder;
 use std::path::Path;
 use std::fs::File;
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::DateTime;
 use log::{info, warn, error};
 
 /// Loads historical market data from a CryptoDataDownload CSV file.

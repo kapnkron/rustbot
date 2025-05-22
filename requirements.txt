@@ -1,0 +1,12 @@
+pandas
+numpy
+torch
+# torchvision # Often installed with torch, uncomment if needed
+# torchaudio # Often installed with torch, uncomment if needed
+scikit-learn
+joblib
+fastapi
+uvicorn[standard] # [standard] includes common extras like websockets
+requests
+python-dotenv
+# Add other specific libraries if you know them 
