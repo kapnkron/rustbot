@@ -25,10 +25,11 @@ dist-ssr
 
 # Rust build artifacts
 target/
-Cargo.lock
 
 # Python virtual environment
-venv/
+/.venv/
+/venv/
+/.pytorch_venv/
 *.pyc
 __pycache__/
 
@@ -36,7 +37,6 @@ __pycache__/
 .env*
 
 # Logs and data
-data/
 
 # OS-specific files
 Thumbs.db
@@ -50,8 +50,6 @@ backup_*.tar.gz
 project_backup_*.tar.gz
 
 # Model files and scalers
-*.pt
-*.pkl
 
 # Build artifacts
 cpp_cuda_check/build/
