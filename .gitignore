@@ -37,7 +37,8 @@ __pycache__/
 .env*
 
 # Logs and data
-
+api_response_actual.txt
+api_response.txt
 # OS-specific files
 Thumbs.db
 
@@ -50,6 +51,9 @@ backup_*.tar.gz
 project_backup_*.tar.gz
 
 # Model files and scalers
+*.pkl
+*.pt
+model_*.pt
 
 # Build artifacts
 cpp_cuda_check/build/
@@ -58,3 +62,10 @@ cpp_cuda_check/cuda_check_stable
 
 # Test fixtures
 /tests/fixtures/
+
+
+# Data files
+*.csv
+*.pkl
+*.pt
+*.txt
