@@ -117,8 +117,8 @@ async fn main() -> Result<()> {
     let dashboard_update_interval = std::time::Duration::from_secs(60);
     let dashboard = Dashboard::new(default_threshold_config, dashboard_update_interval);
     let telegram_bot = Arc::new(TelegramBot::new(
-        config.telegram.bot_token.clone(),
-        config.telegram.chat_id.clone(),
+            config.telegram.bot_token.clone(),
+            config.telegram.chat_id.clone(),
         trading_bot.clone(),
         dashboard,
     ));
@@ -392,12 +392,12 @@ async fn main() -> Result<()> {
                                 telegram_bot.push_log(log_entry).await;
                             } else {
                                 info!("Portfolio state implies Hold for {}. No trade notification sent for this signal cycle.", token_address);
+                                }
                             }
                         }
                     }
                 }
-            }
-            Err(e) => {
+                Err(e) => {
                 error!("Failed to get predictions from ML API: {}", e);
                 // Optionally send Telegram alert for error
                 let alert_msg = format!("Failed to get predictions from ML API: {}", e);

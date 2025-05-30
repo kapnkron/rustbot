@@ -9,4 +9,5 @@ fastapi
 uvicorn[standard] # [standard] includes common extras like websockets
 requests
 python-dotenv
+solana
 # Add other specific libraries if you know them 

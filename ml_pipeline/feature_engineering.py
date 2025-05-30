@@ -129,7 +129,7 @@ def engineer_features(input_csv_path: str, output_csv_path: str) -> dict:
             if group.empty:
                 logger.warning(f"Token {token_address} has insufficient data after label generation. Skipping.")
                 continue
-            
+
             features_list.append(group)
 
         if features_list:

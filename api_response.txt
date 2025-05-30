@@ -1,0 +1,2 @@
+Python executable: /home/morgan/.pytorch_venv/bin/python
+Python sys.path: ['/home/morgan/bot_project/Beatrice', '/usr/lib/python312.zip', '/usr/lib/python3.12', '/usr/lib/python3.12/lib-dynload', '/home/morgan/.pytorch_venv/lib/python3.12/site-packages']

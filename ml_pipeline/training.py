@@ -267,7 +267,7 @@ def run_training_pipeline(
         joblib.dump(scaler_X, scaler_X_path)
         results["scaler_X_path"] = scaler_X_path
         logger.info(f"Scaler_X saved to {scaler_X_path}")
-
+        
         joblib.dump(asset_encoder, asset_encoder_path)
         results["asset_encoder_path"] = asset_encoder_path
         logger.info(f"Asset encoder saved to {asset_encoder_path}")

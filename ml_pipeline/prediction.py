@@ -46,7 +46,7 @@ def load_model_and_scalers(model_path, scaler_x_path, asset_encoder_path, numeri
                   f"derived from loaded asset_encoder ({num_ohe_features}). Expected sum: {expected_combined_features}.")
             input_dim = scaler_X.n_features_in_ # Prioritize scaler's expectation if mismatch
         elif not hasattr(scaler_X, 'n_features_in_'):
-            print(f"Warning: scaler_X does not have n_features_in_. Using sum of numerical & OHE features: {input_dim}")
+                 print(f"Warning: scaler_X does not have n_features_in_. Using sum of numerical & OHE features: {input_dim}")
 
         model = Net(input_dim=input_dim, output_dim=3) # Ensure output_dim=3 for classification
         
@@ -155,7 +155,7 @@ def generate_predictions(
         # 'signal_strength' is the confidence.
         # An explicit 'action' field (Buy/Sell/Hold string) might be added to the Signal model in api_server.py
         # or derived there from raw_prediction.
-        
+
         predictions_list.append({
             "token_address": token_addr,
             "current_price_actual": float(current_actual_price) if current_actual_price is not None else None,
@@ -192,7 +192,7 @@ def get_predictions_for_api(
             return []
 
         # For prediction, 'action_label' isn't strictly needed in the CSV, but 'price' (for current_price_actual) and features are.
-        required_cols_for_prediction = trained_numerical_cols + ['token_address', 'price'] 
+        required_cols_for_prediction = trained_numerical_cols + ['token_address', 'price']
         
         missing_cols = [col for col in required_cols_for_prediction if col not in all_features_df.columns]
         if missing_cols:

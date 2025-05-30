@@ -32,6 +32,18 @@ The primary focus has been on resolving a critical "feature mismatch" error that
 
 **The critical "feature mismatch" bug is now resolved.**
 
+### Solana Historical Data Fetcher (`solana_historical_data_fetcher.py`):
+*   **Goal:** Fetch historical trade data for SOL-based pairs (initially Openbook, now also other DEXs like Orca) to generate OHLCV candles for ML model training.
+*   **Progress:**
+    *   Switched from free RPC to Helius paid tier for increased API limits.
+    *   Refactored to use Helius Enhanced Transactions API (`/v0/addresses/{address}/transactions`).
+    *   Successfully fetched data for SOL/USDC (Openbook) and JUP/SOL (Orca).
+    *   Implemented market-specific processed signature logs to avoid re-fetching duplicate transactions.
+    *   Configured for 1-day test runs for SOL/USDC and JUP/SOL (Orca).
+*   **Current Status:** User is currently performing a test run in their local environment after resolving a Python dependency issue (`pandas` not found).
+*   **Known Issues:**
+    *   The script currently overwrites existing OHLCV CSV files if new trades are found and processed in a run. This means a comprehensive CSV (e.g., from a 30-day fetch) could be replaced by a less comprehensive one (e.g., from a 1-day fetch if it finds any new trades). This needs to be addressed to allow for robust incremental data accumulation.
+
 ## 🚀 Immediate Next Steps:
 
 1.  **Integrate Predictions into Rust Bot Logic:**
@@ -60,6 +72,12 @@ The primary focus has been on resolving a critical "feature mismatch" error that
 4.  **Code Cleanup - Python (Minor):**
     *   **File:** `api_server.py` (and potentially other Python files).
     *   **Task:** Address `DeprecationWarning: datetime.datetime.utcnow() is deprecated`. Replace `datetime.utcnow()` with `datetime.now(datetime.UTC)`.
+
+5.  **Monitor Solana Data Fetcher Test Run:**
+    *   **File:** `solana_historical_data_fetcher.py`
+    *   **Task:** User to report results of the local test run. Verify if data is fetched correctly for SOL-USDC and JUP/SOL (Orca) for the configured 1-day period.
+    *   **Next if Successful:** Plan longer data fetches and address the CSV overwriting issue.
+    *   **Next if Fails:** Diagnose and fix any errors encountered during the test run.
 
 ## ⏳ Future/Blocked Tasks (Previously Discussed - Lower Priority for now):
 
