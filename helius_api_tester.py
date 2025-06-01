@@ -7,7 +7,7 @@ import os
 # Consider using environment variables for production.
 HELIUS_API_KEY = "a936080b-6fb5-4399-96d5-e1cc5694f92d" # Replace with your actual key if different, or use env var
 
-MARKET_ID = "8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6" # Our SOL/USDC Market ID
+MARKET_ID = "32D4zRxNc1EssbJieVHfPhZM3rH6CzfUPrWUuWxD9prG"  # Pool for Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
 
 BASE_URL = f"https://api.helius.xyz/v0/addresses/{MARKET_ID}/transactions"
 
@@ -41,16 +41,16 @@ if __name__ == "__main__":
     print(f"--- Testing Helius Enhanced Transactions API for Market ID: {MARKET_ID} ---")
 
     # --- Test 1: Fetch recent transactions (no type filter, small limit) ---
-    print("\n--- Test 1: Fetching recent transactions (limit=5, no type filter) ---")
-    recent_transactions = fetch_transactions(HELIUS_API_KEY, params={"limit": 5})
+    print("\n--- Test 1: Fetching recent transactions (limit=10, no type filter) ---")
+    recent_transactions = fetch_transactions(HELIUS_API_KEY, params={"limit": 10})
     if recent_transactions:
         print(json.dumps(recent_transactions, indent=2))
     else:
         print("Failed to fetch recent transactions.")
 
     # --- Test 2: Fetch SWAP transactions (small limit) ---
-    print("\n--- Test 2: Fetching SWAP transactions (limit=5) ---")
-    swap_transactions = fetch_transactions(HELIUS_API_KEY, params={"limit": 5, "type": "SWAP"})
+    print("\n--- Test 2: Fetching SWAP transactions (limit=10) ---")
+    swap_transactions = fetch_transactions(HELIUS_API_KEY, params={"limit": 10, "type": "SWAP"})
     if swap_transactions:
         print(json.dumps(swap_transactions, indent=2))
     else:
