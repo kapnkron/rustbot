@@ -5,6 +5,7 @@ import glob
 from datetime import datetime
 import logging
 from typing import List, Dict, Tuple
+import argparse
 
 # Set up logging
 logging.basicConfig(
@@ -21,25 +22,37 @@ class DataPreparator:
         self.raw_data_dir = 'data/raw'
         self.processed_data_dir = 'data/processed'
         os.makedirs(self.processed_data_dir, exist_ok=True)
+        self.helius_6mo_file = 'ohlcv_data_helius_8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6_20241128_to_20250527.csv'
 
-    def load_ohlcv_data(self) -> Dict[str, pd.DataFrame]:
+    def load_ohlcv_data(self, include_6mo=False) -> Dict[str, pd.DataFrame]:
         """Load all OHLCV data files and return a dictionary of DataFrames."""
-        ohlcv_files = glob.glob(os.path.join(self.raw_data_dir, '*_usd_ohlcv.csv'))
+        # Find all 5-min OHLCV files in the project
+        ohlcv_files = glob.glob('**/DATA_*_OHLCV_5min.csv', recursive=True)
         data_dict = {}
-        
         for file in ohlcv_files:
             try:
-                # Extract token address from filename
-                token_address = os.path.basename(file).split('_')[0]
-                df = pd.read_csv(file, index_col='date', parse_dates=True)
-                # Rename 'close' to 'price' for compatibility with the rest of the script
-                df = df.rename(columns={'close': 'price'})
-                df['token_address'] = token_address  # Add token_address column
-                data_dict[token_address] = df
-                logging.info(f"Loaded OHLCV data for {token_address}")
+                # Extract token info from filename
+                token_info = os.path.basename(file).split('_')
+                token_address = token_info[1] if len(token_info) > 1 else os.path.basename(file)
+                df = pd.read_csv(file, parse_dates=True)
+                if 'datetime' in df.columns:
+                    df = df.rename(columns={'close': 'price'})
+                    df['token_address'] = token_address
+                    data_dict[token_address] = df
+                    logging.info(f"Loaded 5-min OHLCV data for {token_address}")
             except Exception as e:
                 logging.error(f"Error loading {file}: {str(e)}")
-        
+        # Optionally include the 6-month file
+        if include_6mo and os.path.exists(self.helius_6mo_file):
+            try:
+                df_6mo = pd.read_csv(self.helius_6mo_file, parse_dates=True)
+                if 'close' in df_6mo.columns:
+                    df_6mo = df_6mo.rename(columns={'close': 'price'})
+                df_6mo['token_address'] = 'SOL_USDC_6mo'
+                data_dict['SOL_USDC_6mo'] = df_6mo
+                logging.info(f"Loaded 6-month Helius OHLCV data")
+            except Exception as e:
+                logging.error(f"Error loading 6-month file: {str(e)}")
         return data_dict
 
     def merge_ohlcv_data(self, data_dict: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -112,10 +125,10 @@ class DataPreparator:
         
         return df
 
-    def prepare_training_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def prepare_training_data(self, include_6mo=False) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """Prepare the final training and testing datasets."""
         # Load and merge data
-        ohlcv_data = self.load_ohlcv_data()
+        ohlcv_data = self.load_ohlcv_data(include_6mo=include_6mo)
         merged_data = self.merge_ohlcv_data(ohlcv_data)
         
         # Add technical indicators
@@ -146,6 +159,10 @@ class DataPreparator:
         return train_data, test_data
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Prepare training data for model.")
+    parser.add_argument('--include-6mo', action='store_true', help='Include the 6-month Helius file in the training data')
+    args = parser.parse_args()
+
     preparator = DataPreparator()
-    train_data, test_data = preparator.prepare_training_data()
+    train_data, test_data = preparator.prepare_training_data(include_6mo=args.include_6mo)
     logging.info("Data preparation completed successfully") 
