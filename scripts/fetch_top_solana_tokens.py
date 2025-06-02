@@ -1,7 +1,7 @@
 import requests
 import time
 
-SOLANA_TRACKER_API_KEY = "ef4f484a-538c-42ac-92c9-3158d267f7e6"
+SOLANA_TRACKER_API_KEY = "SOLANA_TRACKER_API_KEY"
 BASE_URL = "https://data.solanatracker.io"
 TOKEN_MINTS_FILE = "token_mints.txt"
 TOP_N = 100  # Number of tokens to fetch from each endpoint (max 100)
