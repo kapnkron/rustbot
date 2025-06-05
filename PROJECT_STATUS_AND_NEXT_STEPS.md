@@ -32,21 +32,35 @@ The primary focus has been on resolving a critical "feature mismatch" error that
 
 **The critical "feature mismatch" bug is now resolved.**
 
-### Solana Historical Data Fetcher (`solana_historical_data_fetcher.py`):
-*   **Goal:** Fetch historical trade data for SOL-based pairs (initially Openbook, now also other DEXs like Orca) to generate OHLCV candles for ML model training.
+### Solana Historical Data Fetcher (`fetch_ohlcv_rolling.py`):
+*   **Goal:** Fetch historical trade data for SOL-based pairs (initially Openbook, now also other DEXs like Orca using Helius API) to generate 5-minute OHLCV candles for ML model training and the orchestration script (`update_and_prepare_training_data.py`).
 *   **Progress:**
     *   Switched from free RPC to Helius paid tier for increased API limits.
     *   Refactored to use Helius Enhanced Transactions API (`/v0/addresses/{address}/transactions`).
-    *   Successfully fetched data for SOL/USDC (Openbook) and JUP/SOL (Orca).
-    *   Implemented market-specific processed signature logs to avoid re-fetching duplicate transactions.
-    *   Configured for 1-day test runs for SOL/USDC and JUP/SOL (Orca).
-*   **Current Status:** User is currently performing a test run in their local environment after resolving a Python dependency issue (`pandas` not found).
-*   **Known Issues:**
-    *   The script currently overwrites existing OHLCV CSV files if new trades are found and processed in a run. This means a comprehensive CSV (e.g., from a 30-day fetch) could be replaced by a less comprehensive one (e.g., from a 1-day fetch if it finds any new trades). This needs to be addressed to allow for robust incremental data accumulation.
+    *   Updated to select the most liquid pool (>$10k, SOL/USDC quote) in `fetch_pool_addresses.py`.
+    *   Implemented logic for initial 30-day data fetch for new pools and incremental updates for existing ones in `fetch_ohlcv_rolling.py`.
+    *   Added debug `print` statements to `fetch_ohlcv_rolling.py` to investigate data fetching issues.
+*   **Current Status & Issue:**
+    *   Debugging `fetch_ohlcv_rolling.py` revealed that Helius API calls are failing with the error: `{"error":"invalid query parameter limit"}`.
+    *   This occurs for the `https://api.helius.xyz/v0/addresses/{address}/transactions` endpoint.
+    *   The `limit` parameter is documented as valid. The issue might be a subtle type mismatch for `limit` or a conflict with pagination parameters if `before` is used in the initial request. Helius documentation suggests using `before` and `until` for pagination, along with `limit`.
+*   **File Cleanup:**
+    *   All CSVs in `data/raw/` and `data/features/` have been deleted as part of streamlining data processing. Signature list CSVs are intended to be preserved.
+*   **Known Issues (previously):**
+    *   The script previously overwrote existing OHLCV CSV files. This was addressed by implementing incremental updates based on the last timestamp in existing files.
 
 ## 🚀 Immediate Next Steps:
 
-1.  **Integrate Predictions into Rust Bot Logic:**
+1.  **Resolve Helius API "invalid query parameter limit" Error:**
+    *   **File:** `scripts/fetch_ohlcv_rolling.py`
+    *   **Task:**
+        *   Modify the Helius API call logic.
+        *   Use `until` instead of `after` for the initial time bound.
+        *   Fetch in a loop, using the `before` signature from the last transaction of the previous batch for pagination, until no more transactions are returned or the `start_time` is passed.
+        *   Ensure the `limit` parameter is correctly passed as an integer.
+        *   Verify that this resolves the error and allows successful data fetching.
+
+2.  **Integrate Predictions into Rust Bot Logic:**
     *   **File:** `src/main.rs`
     *   **Task:**
         *   Remove the temporary test call block for `ml_api_client.get_predictions()`.
@@ -54,7 +68,7 @@ The primary focus has been on resolving a critical "feature mismatch" error that
         *   Replace any old `PythonPredictor` logic with calls to `ml_api_client.get_predictions()` to fetch predictions as needed for trading decisions.
         *   Ensure the `PredictResponse` data is correctly utilized by the bot.
 
-2.  **Automate ML Artifact Management:**
+3.  **Automate ML Artifact Management:**
     *   **Files:** `ml_pipeline/training.py`, `ml_pipeline/prediction.py`, `api_server.py`.
     *   **Task:**
         *   Currently, artifacts are manually copied from the timestamped training output directory (e.g., `models/neural_network/YYYYMMDD_HHMMSS/`) to the project root and renamed. This needs automation.
@@ -62,22 +76,21 @@ The primary focus has been on resolving a critical "feature mismatch" error that
         *   **Option B (Manifest File):** `training.py` could generate a `latest_model_info.json` pointing to the paths of the current production artifacts. `prediction.py` would read this manifest.
         *   The goal is for `api_server.py` to automatically use the most recent, validated set of artifacts without manual intervention after retraining.
 
-3.  **Code Cleanup - Rust:**
+4.  **Code Cleanup - Rust:**
     *   **Files:** Entire Rust codebase (`src/`).
     *   **Task:**
         *   Address the numerous `#[warn(unused_imports)]` and `#[warn(dead_code)]` warnings.
         *   Run `cargo fix --lib -p trading_bot --allow-dirty` and `cargo fix --bin "trading_bot" --allow-dirty` (use `--allow-dirty` or commit changes first).
         *   Manually review and remove any remaining unused code to improve maintainability.
 
-4.  **Code Cleanup - Python (Minor):**
+5.  **Code Cleanup - Python (Minor):**
     *   **File:** `api_server.py` (and potentially other Python files).
     *   **Task:** Address `DeprecationWarning: datetime.datetime.utcnow() is deprecated`. Replace `datetime.utcnow()` with `datetime.now(datetime.UTC)`.
 
-5.  **Monitor Solana Data Fetcher Test Run:**
-    *   **File:** `solana_historical_data_fetcher.py`
-    *   **Task:** User to report results of the local test run. Verify if data is fetched correctly for SOL-USDC and JUP/SOL (Orca) for the configured 1-day period.
-    *   **Next if Successful:** Plan longer data fetches and address the CSV overwriting issue.
-    *   **Next if Fails:** Diagnose and fix any errors encountered during the test run.
+6.  **Verify Full Data Pipeline Post Helius Fix:**
+    *   **Files:** `update_and_prepare_training_data.py`, `scripts/fetch_pool_addresses.py`, `scripts/fetch_ohlcv_rolling.py`, `scripts/prepare_training_data.py`.
+    *   **Task:** After resolving the Helius API issue, run the orchestrator script (`update_and_prepare_training_data.py`) to ensure the entire data pipeline (pool discovery, OHLCV fetching, training data preparation including the 6-month initial data logic) works end-to-end.
+    *   Monitor logs (`data_fetcher.log`) and output files in `data/processed/` and `data/features/`.
 
 ## ⏳ Future/Blocked Tasks (Previously Discussed - Lower Priority for now):
 
