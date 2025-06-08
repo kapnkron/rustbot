@@ -1,0 +1,290 @@
+{
+  "PVRSE-SOL": {
+    "poolId": "2qagURk5JQwT2kanmtoXfCLPgB2uE4Bp2WSFcBaTizUk",
+    "base": {
+      "address": "qKxNiXm85xhS2QBQBg3u43sf7E4mUDY73LL8N83pump",
+      "symbol": "PVRSE"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "HKDG-SOL": {
+    "poolId": "BYQ8Ue6SkNJJchSa89gW1JagQMvQQ8VqBnAqQ18p1LJL",
+    "base": {
+      "address": "DPb5vkihrYsWAYRGMopAFPJi8ah3qWQsrSUjRr1MQGq4",
+      "symbol": "HKDG"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "MOT-SOL": {
+    "poolId": "HVLTmRY8VATzbcYb8wQ6VJHmKUkf5ELXEend4GviwNE",
+    "base": {
+      "address": "DMNHzC6fprxUcAKM8rEDqVPtTJPYMML3ysPw9yLmpump",
+      "symbol": "MOT"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "Mcat-SOL": {
+    "poolId": "69NpNApMbWahBofQc6rxa7CMebMyFcNBhRakmziDCSxi",
+    "base": {
+      "address": "6JtYP9Qhmy62UpG2YzKA24jCyA9c85HNVdEhSNkaqXZs",
+      "symbol": "Mcat"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "TRUMP-USDC": {
+    "poolId": "9d9mb8kooFfaD3SctgZtkxQypkshx6ezhbKio89ixyy2",
+    "base": {
+      "address": "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfGiPN",
+      "symbol": "TRUMP"
+    },
+    "quote": {
+      "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "symbol": "USDC"
+    },
+    "category": "general_token"
+  },
+  "DICK-SOL": {
+    "poolId": "UwQeqAZ5tqSFiDchUbEeMnEFmN8DtCyY9Rp72nSTf8P",
+    "base": {
+      "address": "1ch9LoL8JMzYLpED5HQeT5D8f2U5K1yich8tRa6iu4g",
+      "symbol": "DICK"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "BREAD-SOL": {
+    "poolId": "BtWccdFNW5XyP6Syt9pfWiV21AiX1sZSaMZdHv7md8XU",
+    "base": {
+      "address": "7GQkAjc4g9kB9g5PbXnEzXpauu7f1vZnMqn3NjfqVuSQ",
+      "symbol": "BREAD"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "UNICAT-SOL": {
+    "poolId": "FL87ULdvGzB3t1RHuNzFawAQEduARNB9VzP7YhpRYwqb",
+    "base": {
+      "address": "2s8hvX8L684ZwprzwTwUdAmYUEt1gPjSXZHH5Lt4ZMXG",
+      "symbol": "UNICAT"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "TOMATO-SOL": {
+    "poolId": "6EER1c4ersQ2A8yXZRMqbZSaHvAYFG1eYXV1z8H7yqjt",
+    "base": {
+      "address": "HBzPSZq4ZfgsDha4SaJ6NozTxsA18foT4qvhgkSwgK3V",
+      "symbol": "TOMATO"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "SOKUMA-SOL": {
+    "poolId": "CSnPXDmDCf8N74aY7fueG8yRFQaHxNKeQqGHSBqCgB33",
+    "base": {
+      "address": "25tWxEocqX9JpmBdzQPhWxerXmu8gAYgEhJQQVEK1eKz",
+      "symbol": "SOKUMA"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "LCAI-SOL": {
+    "poolId": "FR7KNNaYa5Rbvq9KK34q7GuHcNX6UEL9u2iRVxjk459Q",
+    "base": {
+      "address": "6d2eAUM76Q8HoPJYVczFd66iBUVuMFNvCaHtX3oAJiLZ",
+      "symbol": "LCAI"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "ACUS-SOL": {
+    "poolId": "5gEyve2hkkpc5tUrNDAt1xQ9zNCDped5TSejo4P7yU8e",
+    "base": {
+      "address": "ENsSz9faZCxg3KrRcbjrcKFK9wx3T2KcY6KFyubYdLph",
+      "symbol": "ACUS"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "MONSTER-SOL": {
+    "poolId": "7YHfGtf3trJuXnWVAFBeneVUSsWtdR98EimQjoSuB3cR",
+    "base": {
+      "address": "GKGSnmdrEk9vRykxrpdYrATFTqND5SFMwbDjQBgiY27o",
+      "symbol": "MONSTER"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "LAUNCHCOIN-SOL": {
+    "poolId": "YrrUStgPugDp8BbfosqDeFssen6sA75ZS1QJvgnHtmY",
+    "base": {
+      "address": "Ey59PH7Z4BFU4HjyKnyMdWt5GGN76KazTAwQihoUXRnk",
+      "symbol": "LAUNCHCOIN"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "JitoSOL-SOL": {
+    "poolId": "Hp53XEtt4S8SvPCXarsLSdGfZBuUr5mMmZmX2DRNXQKp",
+    "base": {
+      "address": "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn",
+      "symbol": "JitoSOL"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "LAKUMA-SOL": {
+    "poolId": "6bdBMqPLnYAhgBKhenLVrKsrGL5Q2BeWnuZtvWAC1SwD",
+    "base": {
+      "address": "3J2BeBKDMeh2AFYteZdmpXPXEWKEHc2omxJPX5FsH62a",
+      "symbol": "LAKUMA"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "SpringCat-SOL": {
+    "poolId": "G1xjzR1sG6FS9yoFfwc2qaiDzM1EJBRfFH5ZRWP1KX4v",
+    "base": {
+      "address": "EQc4qvKkzn6wC8mpJgFZvyVMwi4TVvDH14wKXbXB3ZDj",
+      "symbol": "SpringCat"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "Fartcoin-SOL": {
+    "poolId": "Bzc9NZfMqkXR6fz1DBph7BDf9BroyEf6pnzESP7v5iiw",
+    "base": {
+      "address": "9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump",
+      "symbol": "Fartcoin"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "WBTC-SOL": {
+    "poolId": "B5EwJVDuAauzUEEdwvbuXzbFFgEYnUqqS37TUM1c4PQA",
+    "base": {
+      "address": "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh",
+      "symbol": "WBTC"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "LILO-SOL": {
+    "poolId": "3xHVv6z1q6w2PivkyoUH67ZumKu8RzrUnawCr4niD1t4",
+    "base": {
+      "address": "9ik97ZNv6SU8FxGzaVTGG1ACrKX6VAvi1BsxZfnKfNGg",
+      "symbol": "LILO"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "COSTCO-SOL": {
+    "poolId": "948AgYWVuVVFHADodKheQ2zfsYz9wGb7maZM9rEmNGda",
+    "base": {
+      "address": "4veK9R9GxmgxqkFhTa2VnE6MJ4YfTxnr92HF5gH5LcAF",
+      "symbol": "COSTCO"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "JLP-SOL": {
+    "poolId": "6a3m2EgFFKfsFuQtP4LJJXPcAe3TQYXNyHUjjZpUxYgd",
+    "base": {
+      "address": "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
+      "symbol": "JLP"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "MASK-SOL": {
+    "poolId": "GWPLjamb5ZxrGbTsYNWW7V3p1pAMryZSfaPFTdaEsWgC",
+    "base": {
+      "address": "6MQpbiTC2YcogidTmKqMLK82qvE9z5QEm7EP3AEDpump",
+      "symbol": "MASK"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  },
+  "JUP-SOL": {
+    "poolId": "C8Gr6AUuq9hEdSYJzoEpNcdjpojPZwqG5MtQbeouNNwg",
+    "base": {
+      "address": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+      "symbol": "JUP"
+    },
+    "quote": {
+      "address": "So11111111111111111111111111111111111111112",
+      "symbol": "SOL"
+    },
+    "category": "general_token"
+  }
+}

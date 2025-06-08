@@ -1,0 +1,18 @@
+{
+  "processed_markets": [
+    "USDT-USDC",
+    "gcat-SOL"
+  ],
+  "markets_to_process": [
+    "JitoSOL-SOL",
+    "Merica-SOL",
+    "JLP-SOL",
+    "mSOL-SOL",
+    "JupSOL-SOL",
+    "MASK-SOL",
+    "AP-SOL",
+    "KLED-SOL",
+    "KBBB-SOL"
+  ],
+  "timestamp": "2025-06-08T18:14:07.100885"
+}

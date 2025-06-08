@@ -8,8 +8,9 @@ use teloxide::utils::command::BotCommands;
 use teloxide::dispatching::repls::CommandReplExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use log::error;
+use log::{error, info};
 use std::collections::VecDeque;
+use std::process::Command as StdCommand;
 
 const RECENT_TRADES_LIMIT: usize = 5;
 
@@ -30,6 +31,10 @@ pub enum Command {
     Backtest,
     #[command(description = "Show recent bot actions/logs")]
     Log,
+    #[command(description = "Run the initial 30-day data pipeline.")]
+    PipelineInitialRun,
+    #[command(description = "Run the rolling 2-day data pipeline update.")]
+    PipelineRollingUpdate,
     #[command(description = "Display this help message")]
     Help,
 }
@@ -315,25 +320,73 @@ impl TelegramBot {
                 }
             }
             Command::Log => {
-                let log = self.log.lock().await;
-                if log.is_empty() {
-                    self.bot.send_message(msg.chat.id, "No recent actions.").await?;
+                let log_entries = self.log.lock().await;
+                let message = if log_entries.is_empty() {
+                    "Log is empty.".to_string()
                 } else {
-                    let log_text = log.iter().rev().take(20).cloned().collect::<Vec<_>>().join("\n");
-                    self.bot.send_message(msg.chat.id, format!("Recent actions:\n{}", log_text)).await?;
-                }
+                    log_entries.iter().rev().cloned().collect::<Vec<_>>().join("\n")
+                };
+                self.bot.send_message(msg.chat.id, format!("*Recent Bot Logs:*\n\n```\n{}\n```", message))
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
+            }
+            Command::PipelineInitialRun => {
+                self.run_pipeline_command(msg.chat.id, true).await?;
+            }
+            Command::PipelineRollingUpdate => {
+                self.run_pipeline_command(msg.chat.id, false).await?;
             }
             Command::Help => {
-                let help_text = "Available commands:\n\
-                    /start - Start the bot\n\
-                    /help - Show this help message\n\
-                    /marketdata - Get current market data\n\
-                    /positions - List current positions\n\
-                    /history - View trade history\n\
-                    /status - Check bot status\n\
-                    /backtest - Run backtest\n\
-                    /log - Show recent bot actions";
-                self.bot.send_message(msg.chat.id, help_text).await?;
+                self.bot.send_message(msg.chat.id, Command::descriptions().to_string()).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_pipeline_command(&self, chat_id: ChatId, initial_run: bool) -> Result<()> {
+        let mode_str = if initial_run { "initial 30-day" } else { "rolling 2-day" };
+        let start_message = format!("🚀 Starting {} pipeline run...", mode_str);
+        self.bot.send_message(chat_id, &start_message).await?;
+        self.push_log(start_message).await;
+
+        let script_path = "scripts/run_pipeline.py";
+        let mut args = vec![script_path];
+        if initial_run {
+            args.push("--initial-run");
+        }
+
+        let handle = tokio::task::spawn_blocking(move || {
+            StdCommand::new("python3")
+                .args(&args)
+                .output()
+        });
+        
+        match handle.await {
+            Ok(Ok(output)) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let exit_code = output.status.code().map_or("None".to_string(), |c| c.to_string());
+
+                let result_message = if output.status.success() {
+                    format!("✅ Pipeline run completed successfully!\n\n*Exit Code:* {}\n\n*Output:*\n```\n{}\n```", exit_code, stdout)
+                } else {
+                    format!("❌ Pipeline run failed!\n\n*Exit Code:* {}\n\n*Output:*\n```\n{}\n```\n\n*Errors:*\n```\n{}\n```", exit_code, stdout, stderr)
+                };
+                
+                self.push_log(format!("Pipeline finished with exit code {}.", exit_code)).await;
+                self.bot.send_message(chat_id, &result_message).parse_mode(ParseMode::MarkdownV2).await?;
+            }
+            Ok(Err(e)) => {
+                let error_message = format!("❌ Failed to execute pipeline script: {}", e);
+                error!("{}", &error_message);
+                self.push_log(error_message.clone()).await;
+                self.bot.send_message(chat_id, &error_message).await?;
+            }
+            Err(e) => {
+                let error_message = format!("❌ Task join error during pipeline execution: {}", e);
+                error!("{}", &error_message);
+                self.push_log(error_message.clone()).await;
+                self.bot.send_message(chat_id, &error_message).await?;
             }
         }
         Ok(())

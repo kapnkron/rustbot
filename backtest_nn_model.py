@@ -3,32 +3,76 @@ import numpy as np
 import torch
 import joblib # For loading scikit-learn scalers/encoders
 import os
+import json
+import argparse
+from pathlib import Path
+import matplotlib.pyplot as plt
+from datetime import datetime
 from sklearn.preprocessing import StandardScaler, OneHotEncoder # Ensure these are available
 
-# Define the same Net class as in train_model.py
-class Net(torch.nn.Module):
-    def __init__(self, input_dim, output_dim=1):
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Backtest price prediction models')
+parser.add_argument('--model_dir', type=str, default='models/neural_network/latest', 
+                   help='Directory containing model files. Defaults to latest model.')
+parser.add_argument('--strategy', type=str, choices=['unified', 'specialized', 'compare'], default='compare', 
+                   help='Strategy to backtest: unified, specialized, or compare (both)')
+args = parser.parse_args()
+
+# Define the same EnhancedNet class as in train_model.py
+class EnhancedNet(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dims=[128, 64, 32], dropout_rate=0.3, output_dim=1):
         super().__init__()
-        self.fc1 = torch.nn.Linear(input_dim, 64)
-        self.relu = torch.nn.ReLU()
-        self.fc2 = torch.nn.Linear(64, 32)
-        self.relu2 = torch.nn.ReLU()
-        self.fc3 = torch.nn.Linear(32, output_dim)
-
+        layers = []
+        
+        # Input layer
+        layers.append(torch.nn.Linear(input_dim, hidden_dims[0]))
+        layers.append(torch.nn.BatchNorm1d(hidden_dims[0]))
+        layers.append(torch.nn.LeakyReLU(0.1))
+        layers.append(torch.nn.Dropout(dropout_rate))
+        
+        # Hidden layers
+        for i in range(len(hidden_dims) - 1):
+            layers.append(torch.nn.Linear(hidden_dims[i], hidden_dims[i+1]))
+            layers.append(torch.nn.BatchNorm1d(hidden_dims[i+1]))
+            layers.append(torch.nn.LeakyReLU(0.1))
+            layers.append(torch.nn.Dropout(dropout_rate))
+        
+        # Output layer
+        layers.append(torch.nn.Linear(hidden_dims[-1], output_dim))
+        
+        self.model = torch.nn.Sequential(*layers)
+    
     def forward(self, x):
-        x = self.relu(self.fc1(x))
-        x = self.relu2(self.fc2(x))
-        return self.fc3(x)
+        return self.model(x)
 
-def load_model_and_scalers(model_path, scaler_X_path, scaler_y_path, encoder_path, input_dim_expected):
+def load_model_and_scalers(model_dir, model_name="unified_model"):
     """Loads the trained model, scalers, and encoder."""
-    model = Net(input_dim=input_dim_expected) # Initialize with expected input_dim
-    model.load_state_dict(torch.load(model_path, weights_only=False))
-    model.eval() # Set to evaluation mode
-
+    model_path = Path(model_dir) / f"{model_name}.pt"
+    joblib_dir = Path(model_dir) / "joblib"
+    
+    scaler_X_path = joblib_dir / 'scaler_X.pkl'
+    scaler_y_path = joblib_dir / 'scaler_y.pkl'
+    encoder_path = joblib_dir / 'asset_encoder.pkl'
+    
+    print(f"Loading model from: {model_path}")
+    print(f"Loading scalers from: {joblib_dir}")
+    
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+    
+    # Load scalers and encoder first
     scaler_X = joblib.load(scaler_X_path)
     scaler_y = joblib.load(scaler_y_path)
     encoder = joblib.load(encoder_path)
+    
+    # Now determine input dimensions from scaler_X
+    input_dim = scaler_X.n_features_in_
+    print(f"Detected input dimension: {input_dim}")
+    
+    # Initialize and load model with correct input dimensions
+    model = EnhancedNet(input_dim=input_dim)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+    model.eval()  # Set to evaluation mode
     
     return model, scaler_X, scaler_y, encoder
 
@@ -37,20 +81,19 @@ def preprocess_test_data(df, scaler_X, encoder, feature_cols, asset_col_name='to
     X_raw = df[feature_cols].copy()
     
     # Handle asset column for one-hot encoding
-    asset_col_reshaped = df[[asset_col_name]].values # Keep as 2D
+    asset_col_reshaped = df[[asset_col_name]].values  # Keep as 2D
     asset_encoded = encoder.transform(asset_col_reshaped)
     
     # Combine numerical features and encoded asset features
-    # Ensure X_raw.values is 2D, asset_encoded is 2D
     X_combined = np.hstack([X_raw.values, asset_encoded])
     
-    # Impute NaNs (as done in training)
+    # Impute NaNs
     X_imputed = np.nan_to_num(X_combined, nan=0.0, posinf=0.0, neginf=0.0)
     
     # Scale features
     X_scaled = scaler_X.transform(X_imputed)
     
-    return X_scaled, df['price'].values, df['token_address'].values # Return original prices and token addresses
+    return X_scaled, df['price'].values, df['token_address'].values, df.get('category', pd.Series(['general_token'] * len(df))).values
 
 def run_trading_simulation(actual_prices, predicted_prices, token_addresses_for_sim, initial_capital=10000.0, transaction_cost_pct=0.001):
     """
@@ -336,188 +379,181 @@ def run_trading_simulation(actual_prices, predicted_prices, token_addresses_for_
         "trades": trades_log
     }
 
+def get_token_categories():
+    """Loads token categories from pool_addresses.json"""
+    try:
+        with open('pool_addresses.json', 'r') as f:
+            pool_addresses = json.load(f)
+            
+        token_categories = {}
+        for market_name, info in pool_addresses.items():
+            base_address = info.get('base', {}).get('address')
+            if base_address:
+                category = info.get('category', 'general_token')
+                token_categories[base_address] = category
+        
+        return token_categories
+    except FileNotFoundError:
+        print("Warning: pool_addresses.json not found. All tokens will be treated as general tokens.")
+        return {}
+
+def predict_with_model(model, X_scaled, scaler_y):
+    """Generate predictions using the model"""
+    with torch.no_grad():
+        X_tensor = torch.tensor(X_scaled, dtype=torch.float32)
+        y_scaled_pred = model(X_tensor).numpy()
+        
+    # Inverse transform (un-scale) the predictions
+    y_log_pred = scaler_y.inverse_transform(y_scaled_pred)
+    
+    # Inverse the log1p transform to get back to the original scale
+    y_pred = np.expm1(y_log_pred).flatten()
+    
+    return y_pred
+
+def plot_backtest_results(results_dict, strategy_name, output_dir=None):
+    """Create plots for backtest results"""
+    if output_dir is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(f"backtest_results/{timestamp}")
+        output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Plot portfolio curve
+    plt.figure(figsize=(12, 6))
+    portfolio_values = results_dict["portfolio_curve"]
+    plt.plot(portfolio_values)
+    plt.title(f"Portfolio Value Over Time - {strategy_name}")
+    plt.xlabel("Time Steps")
+    plt.ylabel("Portfolio Value ($)")
+    plt.grid(True)
+    plt.savefig(output_dir / f"{strategy_name}_portfolio_curve.png")
+    
+    # Save metrics to a text file
+    with open(output_dir / f"{strategy_name}_metrics.txt", 'w') as f:
+        f.write(f"Strategy: {strategy_name}\n")
+        f.write(f"Initial Capital: ${results_dict['initial_capital']:.2f}\n")
+        f.write(f"Final Portfolio Value: ${results_dict['final_portfolio_value']:.2f}\n")
+        f.write(f"Total Return: {results_dict['total_return_pct']:.2f}%\n")
+        f.write(f"Number of Trades: {results_dict['num_trades']}\n")
+        f.write(f"Sharpe Ratio: {results_dict['sharpe_ratio']:.4f}\n")
+        f.write(f"Max Drawdown: {results_dict['max_drawdown_pct']:.2f}%\n")
+    
+    # Save trades log to CSV
+    trades_df = pd.DataFrame(results_dict["trades"])
+    if not trades_df.empty:
+        trades_df.to_csv(output_dir / f"{strategy_name}_trades.csv", index=False)
+    
+    return output_dir
 
 def main():
-    MODEL_PATH = 'model_trading.pt'
-    SCALER_X_PATH = 'scaler_X_trading.pkl'
-    SCALER_Y_PATH = 'scaler_y_trading.pkl'
-    ENCODER_PATH = 'asset_encoder_trading.pkl'
+    # Make path handling more robust
+    model_dir = Path(args.model_dir)
+    if not model_dir.exists():
+        raise FileNotFoundError(f"Model directory not found: {model_dir}")
     
-    TEST_FEATURES_PATH = 'data/features_test_ohlcv.csv' # Use the feature-engineered test set
-
-    try:
-        test_df = pd.read_csv(TEST_FEATURES_PATH, parse_dates=['date'])
-        print(f"Loaded test data from {TEST_FEATURES_PATH}: {test_df.shape}")
-    except FileNotFoundError:
-        print(f"Error: {TEST_FEATURES_PATH} not found. Please ensure scripts/add_features.py has been run for test data.")
-        return
-
-    if test_df.empty:
-        print("Test data is empty. Exiting.")
-        return
+    print(f"=== Starting Backtest ===")
+    print(f"Model directory: {model_dir}")
+    print(f"Strategy: {args.strategy}")
+    
+    # Get token categories
+    token_categories = get_token_categories()
+    
+    # Load test data
+    test_data_path = 'data/features_test_ohlcv.csv'
+    print(f"Loading test data from: {test_data_path}")
+    test_df = pd.read_csv(test_data_path)
+    
+    # Add category to test data
+    test_df['category'] = test_df['token_address'].map(token_categories).fillna('general_token')
+    print(f"Token categories in test data: {test_df['category'].value_counts()}")
+    
+    # Define features
+    features = [col for col in test_df.columns if col not in ['date', 'price', 'token_address', 'category']]
+    
+    # Timestamp for output
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = Path(f"backtest_results/{timestamp}")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    if args.strategy in ['unified', 'compare']:
+        # Test the unified model
+        print("\n=== Testing Unified Model ===")
+        model, scaler_X, scaler_y, encoder = load_model_and_scalers(model_dir, "unified_model")
         
-    # Get column names from features_ohlcv.csv to define the universe of possible features
-    # This should now be features_train_ohlcv.csv to match what the model was trained on.
-    TRAIN_FEATURES_PATH = 'data/features_train_ohlcv.csv'
-    try:
-        all_cols_from_training_features_file = pd.read_csv(TRAIN_FEATURES_PATH, nrows=0).columns.tolist()
-    except FileNotFoundError:
-        print(f"Error: {TRAIN_FEATURES_PATH} not found. This file is needed to determine feature columns from training.")
-        return
+        # Preprocess all test data
+        X_scaled, actual_prices, token_addresses, categories = preprocess_test_data(test_df, scaler_X, encoder, features)
         
-    feature_cols = [col for col in all_cols_from_training_features_file if col not in ['date', 'price', 'token_address']]
-    
-    print(f"Using feature columns (derived from training set): {feature_cols}")
-
-    # Remove the detailed warning about data misalignment as we are now attempting to use the correct files.
-    # The critical error checks for missing columns and dimension mismatch will still apply.
-    # print("\n--- WARNING: Data Alignment Assumption ---")
-    # print("This script currently assumes 'data/processed/test_data.csv' contains feature-engineered data")
-    # print("similar to 'data/features_ohlcv.csv'. This is likely NOT the case.")
-    # print("To fix: 1. 'scripts/add_features.py' should process 'data/processed/test_data.csv' and save 'data/features_test_ohlcv.csv'.")
-    # print("        2. This script should then load 'data/features_test_ohlcv.csv'.")
-    # print("Proceeding with current test_df, but results may be invalid if features are not engineered.")
-    # print("---------------------------------------\n")
-
-    # Check if test_df has all the 'feature_cols' derived from features_ohlcv.csv
-    # Note: test_data.csv is generated from prepare_training_data.py which loads individual ohlcv_*.csv files.
-    # It might not have all the engineered features from features_ohlcv.csv (which is made by add_features.py).
-    # The correct approach is that train_data.csv and test_data.csv (outputs of prepare_training_data)
-    # should be what add_features.py processes to create train_features.csv and test_features.csv.
-    # Currently, train_model.py uses features_ohlcv.csv which is based on train_data.csv.
-    # For backtesting, we need a test_features.csv.
-    # Let's assume for now test_df *is* the feature-engineered test set.
-    # This implies that prepare_training_data.py needs to save a test set that add_features.py can process.
-    # Or, add_features.py needs to process test_data.csv too.
-
-    # Simplification for now: Assuming test_df *is* the feature set for demonstration if features match.
-    # The feature_cols list derived above is from features_ohlcv.csv (the training feature set).
-    # We must ensure these columns are in test_df.
-    
-    actual_feature_cols_in_test_df = [col for col in feature_cols if col in test_df.columns]
-    if len(actual_feature_cols_in_test_df) != len(feature_cols):
-        print(f"Warning: Mismatch in feature columns. Expected {len(feature_cols)} features based on training, found {len(actual_feature_cols_in_test_df)} in test_df.")
-        print(f"Missing from test_df: {set(feature_cols) - set(test_df.columns)}")
-        print("Using common available features. This might lead to input_dim mismatch for the model if not handled.")
-        # This will likely lead to an error when creating X_combined if one-hot encoding size is based on full feature_cols.
-        # For robust solution, ensure test_df IS the feature-engineered test data.
-        # For now, we will proceed, but this is a major point to fix in the data pipeline.
-    
-    # Use only features available in test_df for preprocessing to avoid errors,
-    # but acknowledge this may not match model's trained input_dim.
-    current_feature_cols_for_processing = actual_feature_cols_in_test_df
-
-
-    # Determine input_dim for the model (must match training)
-    try:
-        temp_encoder = joblib.load(ENCODER_PATH)
-        num_one_hot_features = temp_encoder.categories_[0].shape[0]
-    except FileNotFoundError:
-        print(f"Error: Encoder file not found at {ENCODER_PATH}")
-        return
+        # Generate predictions
+        predicted_prices = predict_with_model(model, X_scaled, scaler_y)
         
-    # The input_dim should be based on the original number of features the model was trained on.
-    # This was len(feature_cols_from_features_ohlcv) + num_one_hot_features
-    input_dim_expected = len(feature_cols) + num_one_hot_features 
-    print(f"Expected model input_dim (from training): {input_dim_expected} ({len(feature_cols)} raw features + {num_one_hot_features} one-hot features)")
-
-
-    model, scaler_X, scaler_y, encoder = load_model_and_scalers(
-        MODEL_PATH, SCALER_X_PATH, SCALER_Y_PATH, ENCODER_PATH, input_dim_expected
-    )
+        # Run simulation
+        unified_results = run_trading_simulation(actual_prices, predicted_prices, token_addresses)
+        
+        # Plot and save results
+        plot_backtest_results(unified_results, "unified_model", results_dir)
+        
+        print(f"\nUnified Model Backtest Results:")
+        print(f"Initial Capital: ${unified_results['initial_capital']:.2f}")
+        print(f"Final Portfolio Value: ${unified_results['final_portfolio_value']:.2f}")
+        print(f"Total Return: {unified_results['total_return_pct']:.2f}%")
+        print(f"Number of Trades: {unified_results['num_trades']}")
+        print(f"Sharpe Ratio: {unified_results['sharpe_ratio']:.4f}")
+        print(f"Max Drawdown: {unified_results['max_drawdown_pct']:.2f}%")
     
-    # We must use the original feature_cols list for X_raw selection in preprocess_test_data
-    # if test_df is assumed to be the feature-engineered set.
-    # If test_df is NOT feature-engineered, it won't have these columns.
-    # This is where the pipeline needs fixing.
-    # For this run, let's assume test_df *should* have the columns defined by feature_cols.
-    # If not, preprocess_test_data will fail or use wrong data.
-
-    missing_training_features_in_test = [col for col in feature_cols if col not in test_df.columns]
-    if missing_training_features_in_test:
-        print(f"CRITICAL ERROR: The loaded test_df is missing essential features the model was trained on: {missing_training_features_in_test}")
-        print("This usually means data/processed/test_data.csv is NOT feature-engineered like data/features_ohlcv.csv was.")
-        print("Please ensure your data pipeline creates a feature-engineered test set.")
-        return
-
-
-    X_test_scaled, actual_prices_for_sim, token_addresses_for_sim = preprocess_test_data(test_df, scaler_X, encoder, feature_cols, asset_col_name='token_address')
-    
-    print(f"Shape of X_test_scaled: {X_test_scaled.shape}")
-    if X_test_scaled.shape[1] != input_dim_expected:
-        print(f"CRITICAL ERROR: Dimension mismatch for model input. Expected {input_dim_expected}, Got {X_test_scaled.shape[1]}")
-        print("This is likely due to discrepancies in feature sets between training and testing.")
-        return
-
-    # Make predictions
-    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32)
-    with torch.no_grad():
-        y_pred_scaled_tensor = model(X_test_tensor)
-    
-    y_pred_scaled_log = y_pred_scaled_tensor.cpu().numpy()
-
-    # ---> Add prints for y_pred_scaled_log (raw model output before inverse scaling)
-    print("\n--- Raw Scaled Predictions (y_pred_scaled_log) --- ")
-    print(f"y_pred_scaled_log shape: {y_pred_scaled_log.shape}")
-    print(f"Min: {np.min(y_pred_scaled_log):.8f}, Max: {np.max(y_pred_scaled_log):.8f}, Mean: {np.mean(y_pred_scaled_log):.8f}, Std: {np.std(y_pred_scaled_log):.8f}")
-    percentiles_pred_log = [1, 5, 25, 50, 75, 95, 99]
-    print(f"Percentiles: { {p: np.percentile(y_pred_scaled_log, p) for p in percentiles_pred_log} }")
-    
-    # ---> Clip raw model output to a new range based on observed y_pred_scaled_log distribution
-    # Min y_pred_scaled_log (1st percentile from last RobustScaler run): -1.15800476
-    # Max y_pred_scaled_log (99th percentile from last RobustScaler run):  2.69177508
-    min_clip_val = -1.15800476 
-    max_clip_val = 2.69177508
-    y_pred_scaled_log_clipped = np.clip(y_pred_scaled_log, min_clip_val, max_clip_val)
-    print("\n--- Clipped Scaled Predictions (y_pred_scaled_log_clipped) --- ")
-    print(f"Min: {np.min(y_pred_scaled_log_clipped):.8f}, Max: {np.max(y_pred_scaled_log_clipped):.8f}, Mean: {np.mean(y_pred_scaled_log_clipped):.8f}, Std: {np.std(y_pred_scaled_log_clipped):.8f}")
-    print(f"Percentiles: { {p: np.percentile(y_pred_scaled_log_clipped, p) for p in percentiles_pred_log} }") # Using same percentiles for comparison
-    print("--------------------------------------------------\n")
-
-    # Inverse transform from scaler_y (which was fit on log-prices)
-    # Use the clipped values for inverse transformation
-    predicted_next_log_prices = scaler_y.inverse_transform(y_pred_scaled_log_clipped).flatten()
-    # Apply expm1 to convert log-prices back to actual prices
-    predicted_next_prices = np.expm1(predicted_next_log_prices)
-    
-    # Ensure no NaNs/infs after transformations, replace with a neutral value (e.g., previous price or 0 if appropriate)
-    # For now, let's clip extreme predictions that might result from expm1 on large log values
-    # or ensure they are non-negative.
-    predicted_next_prices = np.nan_to_num(predicted_next_prices, nan=0.0, posinf=np.finfo(np.float32).max, neginf=0.0) # Replace NaNs with 0, large infs with max float
-    predicted_next_prices = np.maximum(predicted_next_prices, 0) # Ensure prices are not negative
-
-    simulation_actual_prices = test_df['price'].values
-    
-    print(f"Length of actual_prices_for_sim (test_df['price']): {len(simulation_actual_prices)}")
-    print(f"Length of predicted_next_prices: {len(predicted_next_prices)}")
-
-    # --- Add summary statistics for predictions vs actuals ---
-    if len(simulation_actual_prices) > 0 and len(predicted_next_prices) > 0:
-        # Ensure lengths match for ratio calculation, use the shorter length
-        valid_length = min(len(simulation_actual_prices), len(predicted_next_prices))
-        actuals_for_stats = simulation_actual_prices[:valid_length]
-        preds_for_stats = predicted_next_prices[:valid_length]
-
-        print("\n--- Price Statistics Before Simulation ---")
-        print(f"Actual Prices (test set) - Min: {np.min(actuals_for_stats):.8f}, Max: {np.max(actuals_for_stats):.8f}, Mean: {np.mean(actuals_for_stats):.8f}, Median: {np.median(actuals_for_stats):.8f}")
-        print(f"Predicted Next Prices    - Min: {np.min(preds_for_stats):.8f}, Max: {np.max(preds_for_stats):.8f}, Mean: {np.mean(preds_for_stats):.8f}, Median: {np.median(preds_for_stats):.8f}")
-
-        # Calculate ratio, avoiding division by zero or very small numbers
-        # Consider only actual prices > some small epsilon for meaningful ratio
-        mask_for_ratio = actuals_for_stats > 1e-9 
-        if np.any(mask_for_ratio):
-            ratios = preds_for_stats[mask_for_ratio] / actuals_for_stats[mask_for_ratio]
-            print(f"Prediction/Actual Ratio  - Min: {np.min(ratios):.2f}x, Max: {np.max(ratios):.2f}x, Mean: {np.mean(ratios):.2f}x, Median: {np.median(ratios):.2f}x (for actuals > 1e-9)")
-            print(f"Number of ratios calculated: {len(ratios)} out of {valid_length} possible.")
+    if args.strategy in ['specialized', 'compare']:
+        # Test the specialized models
+        print("\n=== Testing Specialized Models ===")
+        
+        # First check if specialized models exist
+        general_model_path = model_dir / "general_token_model.pt"
+        pump_model_path = model_dir / "pump_graduate_model.pt"
+        
+        # If we don't have specialized models, skip this part
+        if not (general_model_path.exists() and pump_model_path.exists()):
+            print("Specialized models not found. Skipping specialized model testing.")
         else:
-            print("Prediction/Actual Ratio  - Could not calculate: no actual prices > 1e-9.")
-        print("--------------------------------------\n")
-
-    if len(simulation_actual_prices) == 0 or len(predicted_next_prices) == 0 or len(token_addresses_for_sim) == 0:
-        print("No data for simulation after processing. Exiting.")
-        return
-        
-    run_trading_simulation(simulation_actual_prices, predicted_next_prices, token_addresses_for_sim)
+            # Load both specialized models
+            general_model, scaler_X, scaler_y, encoder = load_model_and_scalers(model_dir, "general_token_model")
+            pump_model, _, _, _ = load_model_and_scalers(model_dir, "pump_graduate_model")
+            
+            # Preprocess all test data
+            X_scaled, actual_prices, token_addresses, categories = preprocess_test_data(test_df, scaler_X, encoder, features)
+            
+            # Generate predictions using the appropriate model for each token
+            specialized_predictions = np.zeros_like(actual_prices)
+            
+            for i in range(len(categories)):
+                X_sample = X_scaled[i:i+1]  # Get a single sample
+                if categories[i] == 'pump_graduate':
+                    # Use pump graduate model
+                    with torch.no_grad():
+                        X_tensor = torch.tensor(X_sample, dtype=torch.float32)
+                        y_scaled_pred = pump_model(X_tensor).numpy()
+                else:
+                    # Use general token model
+                    with torch.no_grad():
+                        X_tensor = torch.tensor(X_sample, dtype=torch.float32)
+                        y_scaled_pred = general_model(X_tensor).numpy()
+                
+                # Inverse transform
+                y_log_pred = scaler_y.inverse_transform(y_scaled_pred)
+                specialized_predictions[i] = np.expm1(y_log_pred[0][0])
+            
+            # Run simulation with specialized predictions
+            specialized_results = run_trading_simulation(actual_prices, specialized_predictions, token_addresses)
+            
+            # Plot and save results
+            plot_backtest_results(specialized_results, "specialized_models", results_dir)
+            
+            print(f"\nSpecialized Models Backtest Results:")
+            print(f"Initial Capital: ${specialized_results['initial_capital']:.2f}")
+            print(f"Final Portfolio Value: ${specialized_results['final_portfolio_value']:.2f}")
+            print(f"Total Return: {specialized_results['total_return_pct']:.2f}%")
+            print(f"Number of Trades: {specialized_results['num_trades']}")
+            print(f"Sharpe Ratio: {specialized_results['sharpe_ratio']:.4f}")
+            print(f"Max Drawdown: {specialized_results['max_drawdown_pct']:.2f}%")
+    
+    print(f"\nBacktest results saved to: {results_dir}")
 
 if __name__ == "__main__":
     main() 
