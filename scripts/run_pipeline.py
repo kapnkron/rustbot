@@ -55,7 +55,7 @@ def get_scripts(initial_run: bool, days_override: int = None) -> list:
         logging.info("Skipping sentiment data collection as SKIP_SENTIMENT is set to true")
     
     scripts.extend([
-        (fetch_desc, [python_executable, "scripts/fetch_historical_ohlcv.py", "--days", fetch_days, "--threads", "10"]),
+        (fetch_desc, [python_executable, "scripts/fetch_historical_ohlcv.py", "--days", fetch_days, "--threads", "16"]),
         ("Preparing training data (including existing 6-month SOL-USDC data)", [python_executable, "scripts/prepare_training_data.py", "--include-6mo"]),
         ("Engineering features", [python_executable, "scripts/add_features.py"]),
         ("Training ML model", [python_executable, "train_model.py"]),
@@ -90,7 +90,7 @@ def get_data_collection_scripts(initial_run: bool, days_override: int = None) ->
     else:
         logging.info("Skipping sentiment data collection as SKIP_SENTIMENT is set to true")
     
-    scripts.append((fetch_desc, [python_executable, "scripts/fetch_historical_ohlcv.py", "--days", fetch_days, "--threads", "10"]))
+    scripts.append((fetch_desc, [python_executable, "scripts/fetch_historical_ohlcv.py", "--days", fetch_days, "--threads", "16"]))
     
     return scripts
 

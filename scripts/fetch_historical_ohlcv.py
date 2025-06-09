@@ -51,6 +51,7 @@ import traceback
 import signal
 import pickle
 import time
+from solders.signature import Signature as SoldersSignature
 
 # --- Environment Loading ---
 load_dotenv()
@@ -110,7 +111,7 @@ error_log_handler = logging.FileHandler("data_fetcher_error.log")
 error_log_handler.setLevel(logging.ERROR)
 error_log_handler.setFormatter(error_formatter)
 
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("data_fetcher.log"),
@@ -471,14 +472,37 @@ def fetch_trade_history_for_market(
             for tx_data in batch_tx_data:
                 if should_exit:
                     break
-                    
                 try:
-                    sig_str = tx_data['transaction']['signatures'][0]
-                    
-                    # Skip if already processed
-                    if sig_str in current_market_processed_signatures:
+                    # DEBUG: Log the structure of tx_data before signature extraction
+                    logging.debug(f"tx_data type: {type(tx_data)}, dir: {dir(tx_data)}, repr: {repr(tx_data)[:500]}")
+                    # Defensive extraction of signature
+                    sig_str = None
+                    # Try multiple ways to extract the signature
+                    if hasattr(tx_data, "transaction"):
+                        txn = tx_data.transaction
+                        if hasattr(txn, "signatures"):
+                            sigs = txn.signatures
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                        elif isinstance(txn, dict) and "signatures" in txn:
+                            sigs = txn["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                    elif isinstance(tx_data, dict):
+                        # Sometimes the signature is at the top level
+                        if "transaction" in tx_data and "signatures" in tx_data["transaction"]:
+                            sigs = tx_data["transaction"]["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                        elif "signatures" in tx_data:
+                            sigs = tx_data["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                    # If still not found, log the full structure for debugging
+                    if sig_str is None:
+                        logging.error(f"Could not extract signature from transaction for {market_name}")
+                        logging.error(f"tx_data repr: {repr(tx_data)}")
                         continue
-                        
                     # Process transaction
                     trade = process_single_transaction(
                         client,
@@ -489,12 +513,10 @@ def fetch_trade_history_for_market(
                         processed_signatures_log_file,
                         current_market_processed_signatures
                     )
-                    
                     if trade:
                         trades.append(trade)
-                        
                 except Exception as e:
-                    logging.error(f"Error processing cached transaction for {market_name}: {str(e)}")
+                    logging.error(f"Error processing transaction for {market_name}: {str(e)}")
     
     # Continue with normal fetching if needed
     while not should_exit and empty_response_count < EMPTY_RESPONSE_LIMIT:
@@ -505,7 +527,7 @@ def fetch_trade_history_for_market(
             # Create proper config for getSignaturesForAddress
             if before_signature_str:
                 try:
-                    before_val = before_signature_str.strip()
+                    before_val = SoldersSignature.from_string(before_signature_str.strip())
                     logging.info(f"Calling get_signatures_for_address with before={before_val} (type: {type(before_val)}) and limit={MAX_SIGNATURES_TO_FETCH}")
                     signatures_response = client.get_signatures_for_address(
                         pubkey,
@@ -587,16 +609,45 @@ def fetch_trade_history_for_market(
                 logging.info(f"No new signatures to process for {market_name} (empty response count: {empty_response_count})")
                 continue
                 
+            logging.info(f"Fetched {len(signature_strs)} signatures for {market_name}, now fetching transactions...")
             # Batch process transactions
             batch_tx_data = batch_get_transactions(client, batch_signatures)
+            logging.info(f"Fetched {len(batch_tx_data)} transactions for {market_name}")
             
             for tx_data in batch_tx_data:
                 if should_exit:
                     break
-                    
                 try:
-                    sig_str = tx_data['transaction']['signatures'][0]
-                    
+                    # DEBUG: Log the structure of tx_data before signature extraction
+                    logging.debug(f"tx_data type: {type(tx_data)}, dir: {dir(tx_data)}, repr: {repr(tx_data)[:500]}")
+                    # Defensive extraction of signature
+                    sig_str = None
+                    # Try multiple ways to extract the signature
+                    if hasattr(tx_data, "transaction"):
+                        txn = tx_data.transaction
+                        if hasattr(txn, "signatures"):
+                            sigs = txn.signatures
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                        elif isinstance(txn, dict) and "signatures" in txn:
+                            sigs = txn["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                    elif isinstance(tx_data, dict):
+                        # Sometimes the signature is at the top level
+                        if "transaction" in tx_data and "signatures" in tx_data["transaction"]:
+                            sigs = tx_data["transaction"]["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                        elif "signatures" in tx_data:
+                            sigs = tx_data["signatures"]
+                            if isinstance(sigs, list) and sigs:
+                                sig_str = sigs[0]
+                    # If still not found, log the full structure for debugging
+                    if sig_str is None:
+                        logging.error(f"Could not extract signature from transaction for {market_name}")
+                        logging.error(f"tx_data repr: {repr(tx_data)}")
+                        continue
                     # Process transaction
                     trade = process_single_transaction(
                         client,
@@ -607,10 +658,8 @@ def fetch_trade_history_for_market(
                         processed_signatures_log_file,
                         current_market_processed_signatures
                     )
-                    
                     if trade:
                         trades.append(trade)
-                        
                 except Exception as e:
                     logging.error(f"Error processing transaction for {market_name}: {str(e)}")
             
@@ -641,6 +690,25 @@ def process_single_transaction(
     processed_set: set[str]
 ) -> Optional[Dict[str, Any]]:
     """Process a single transaction to extract trade data if available."""
+    logging.info(f"process_single_transaction called for market: {market_name}")
+    # Force logging of the full transaction structure for the first transaction of any market
+    if not hasattr(process_single_transaction, "_logged_markets"):
+        process_single_transaction._logged_markets = set()
+    if market_name not in process_single_transaction._logged_markets:
+        import pprint
+        logging.info(f"=== RAW TRANSACTION DATA FOR {market_name} ===")
+        try:
+            logging.info(pprint.pformat(signature.__dict__ if hasattr(signature, '__dict__') else signature))
+            if hasattr(signature, 'signature'):
+                logging.info("=== SIGNATURE FIELD ===")
+                logging.info(pprint.pformat(signature.signature.__dict__ if hasattr(signature.signature, '__dict__') else signature.signature))
+            if hasattr(signature, 'block_time'):
+                logging.info("=== BLOCK TIME ===")
+                logging.info(f"{signature.block_time}")
+        except Exception as e:
+            logging.error(f"Error logging transaction structure for {market_name}: {e}")
+        process_single_transaction._logged_markets.add(market_name)
+    
     sig_str = str(signature)
     
     # Skip if already processed
@@ -700,22 +768,20 @@ def process_single_transaction(
         return None
 
 def worker_thread(market_queue, results, processed_markets, progress_bar=None, days_to_fetch=NUM_DAYS_TO_FETCH):
+    logging.info(f"Thread {threading.current_thread().name} started")
     global should_exit
     client = Client(RPC_ENDPOINT)
     
     while not market_queue.empty() and not should_exit:
         try:
-            market_config = market_queue.get_nowait()
-        except queue.Empty:
-            break
-            
-        try:
+            market = market_queue.get_nowait()
+            logging.info(f"Thread {threading.current_thread().name} processing market: {market.get('market_name', market)}")
             # Pass days_to_fetch to fetch_and_save_market_data
-            result = fetch_and_save_market_data(market_config, client, days_to_fetch)
+            result = fetch_and_save_market_data(market, client, days_to_fetch)
             
             # Record successful processing
             with checkpoint_lock:
-                processed_markets.append(market_config)
+                processed_markets.append(market)
                 
             # Save checkpoint periodically (every market)
             remaining_markets = list(market_queue.queue)
@@ -726,17 +792,17 @@ def worker_thread(market_queue, results, processed_markets, progress_bar=None, d
                 progress_bar.update(1)
                 
         except Exception as e:
-            error_msg = f"Error processing market {market_config['name']}: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"Error processing market {market.get('market_name', market)}: {str(e)}\n{traceback.format_exc()}"
             logging.error(error_msg)
             
             # Log to error file
             with open(ERROR_LOG_FILE, 'a') as f:
-                f.write(f"[{datetime.now().isoformat()}] Market: {market_config['name']}\n")
+                f.write(f"[{datetime.now().isoformat()}] Market: {market.get('market_name', market)}\n")
                 f.write(error_msg + "\n\n")
             
             # Put the market back at the end of the queue for retry, unless we're exiting
             if not should_exit:
-                market_queue.put(market_config)
+                market_queue.put(market)
                 time.sleep(5)  # Wait before retry
         finally:
             market_queue.task_done()
@@ -876,6 +942,8 @@ def process_markets_threaded(markets_to_process: List[Dict[str, Any]], processed
     # Add all markets to the queue
     for market in markets_to_process:
         market_queue.put(market)
+    logging.info(f"Markets to process: {len(markets_to_process)}")
+    logging.info(f"Market names: {[m.get('market_name', m) for m in markets_to_process]}")
     
     # Adjust workers if fewer markets than max_workers
     actual_workers = min(max_workers, len(markets_to_process))

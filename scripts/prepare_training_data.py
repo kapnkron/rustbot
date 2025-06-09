@@ -130,7 +130,22 @@ class DataPreparator:
         # Load and merge data
         ohlcv_data = self.load_ohlcv_data(include_6mo=include_6mo)
         merged_data = self.merge_ohlcv_data(ohlcv_data)
-        
+
+        # Filter to only include tokens with reliable data
+        allowed_tokens = [
+            'ada_usd_ohlcv',
+            'bonk_usd_ohlcv',
+            'eth_usd_ohlcv',
+            'link_usd_ohlcv',
+            'poloniex_solusdc_1h',
+            'sol_usd_ohlcv',
+            'usdt_usd_ohlcv',
+            'wif_usd_ohlcv',
+        ]
+        merged_data = merged_data[merged_data['token_address'].isin(allowed_tokens)]
+        logging.info(f"Filtered merged data to allowed tokens: {allowed_tokens}")
+        logging.info(f"Remaining rows after filtering: {len(merged_data)}")
+
         # Add technical indicators
         processed_data = self.add_technical_indicators(merged_data)
         
